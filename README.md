@@ -1,4 +1,4 @@
-# dicom-retrieval-accelerator
+# go-dicom-gateway
 
 Learning project exploring DICOM retrieval acceleration for OHIF viewer using Go.
 
