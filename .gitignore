@@ -1,0 +1,17 @@
+# binaries
+/bin/
+/dist/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
