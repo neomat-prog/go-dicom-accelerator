@@ -4,6 +4,8 @@
 [![Project Status](https://img.shields.io/badge/status-in%20progress-0f766e)](./AGENT.md)
 [![OHIF Gateway](https://img.shields.io/badge/OHIF-DICOM%20gateway-1d4ed8)](./AGENT.md)
 
+<img align="right" width="200" src="image-Photoroom.png" alt="Go DICOM Gateway project visual">
+
 ### Go HTTP service for serving DICOM instances and metadata today, and growing into an OHIF-facing imaging gateway backed by GCP services
 
 This project provides a simple Go backend for DICOM delivery workflows.
@@ -19,10 +21,6 @@ The intended flow for this repository is:
 `OHIF Viewer -> Go backend -> GCP Healthcare API / Cloud Storage`
 
 Right now the service is intentionally small. The goal is to build the platform in layers: first local retrieval and correct HTTP behavior, then cloud-backed retrieval, then OHIF integration, and only after that performance work such as caching, retries, prefetching, and concurrency-oriented optimizations.
-
-<p align="center">
-  <img src="image-Photoroom.png" alt="Go DICOM Gateway project visual" width="260">
-</p>
 
 ## Installation
 
