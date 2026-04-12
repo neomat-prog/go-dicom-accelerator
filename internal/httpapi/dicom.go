@@ -1,3 +1,7 @@
+// This file defines a HTTP handler for serving DICOM files.
+// Requests to the /dicom endpoint will return the DICOM file with the appropriate content
+// type and disposition headers. The file is read from the path specified in the configuration.
+
 package httpapi
 
 import (
