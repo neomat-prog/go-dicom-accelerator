@@ -5,10 +5,55 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 )
+
+// TODO(neomat-prog) 12.04.26: Create a proper endpoint for fetching and serving DICOM files.
+// add more endpoints for listing available DICOM files for now and fetching via STUDY UID, SERIES UID, and INSTANCE UID.
+// FUTURE: implement a more robust solution to obtain files from DICOM Store GCP
+
+//TODO(neomat-prog) 12.04.26 : detect and expose study/series/instance UIDs from DICOM metadata
+
+/*
+
+GET /studies
+GET /studies/{studyUID}
+GET /studies/{studyUID}/series
+GET /studies/{studyUID}/series/{seriesUID}/instances
+GET /studies/{studyUID}/series/{seriesUID}/instances/{instanceUID}
+
+FUTURE: implement a retrieval layer
+a metadata/index layer
+handlers that call those layers
+
+*/
+
+type DICOMMetadata struct {
+	StudyInstanceUID  string `json:"studyInstanceUID"`
+	SeriesInstanceUID string `json:"seriesInstanceUID"`
+	SOPInstanceUID    string `json:"sopInstanceUID"`
+}
+
+func dicomMetadataHandler(dicomFilePath string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		metadata, err := readDicomMetadata(dicomFilePath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		if err := json.NewEncoder(w).Encode(metadata); err != nil {
+			http.Error(w, "failed to encode metadata", http.StatusInternalServerError)
+			return
+		}
+	}
+}
 
 func dicomHandler(dicomFilePath string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
