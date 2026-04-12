@@ -4,7 +4,7 @@
 [![Project Status](https://img.shields.io/badge/status-in%20progress-0f766e)](./AGENT.md)
 [![OHIF Gateway](https://img.shields.io/badge/OHIF-DICOM%20gateway-1d4ed8)](./AGENT.md)
 
-<img align="right" width="200" src="image-Photoroom.png" alt="Go DICOM Gateway project visual">
+<img align="right" width="200" src="./assets/gopher.png" alt="Go DICOM Gateway project visual">
 
 ### Go HTTP service for serving DICOM instances and metadata today, and growing into an OHIF-facing imaging gateway backed by GCP services
 
