@@ -14,8 +14,6 @@ It currently provides:
 - a DICOM metadata endpoint for study, series, and instance UIDs
 - a clean starting point for later OHIF, GCS, and Healthcare API integration
 
-<img align="right" width="220" src="docs/assets/go-dicom-gopher.svg" alt="Go DICOM gopher">
-
 The intended flow for this repository is:
 
 `OHIF Viewer -> Go backend -> GCP Healthcare API / Cloud Storage`
