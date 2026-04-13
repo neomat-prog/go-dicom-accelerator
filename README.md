@@ -118,55 +118,6 @@ GET /studies/{studyUID}/series/{seriesUID}/instances
 GET /studies/{studyUID}/series/{seriesUID}/instances/{instanceUID}
 ```
 
-## Development Roadmap
-
-### Phase 1: Stabilize the HTTP Foundation
-
-Focus on:
-
-- `net/http`
-- handlers
-- routing
-- correct status codes
-- request and response behavior
-- serving files correctly
-
-### Phase 2: Return One DICOM From a Real Source
-
-Start with:
-
-- local disk
-- or a single GCS object
-
-### Phase 3: Add GCP Integration
-
-Planned areas:
-
-- GCP project setup
-- service account authentication
-- Healthcare API integration
-- DICOM Store retrieval
-
-### Phase 4: Connect OHIF
-
-At this stage the backend becomes the integration layer that reveals:
-
-- what OHIF expects from the backend
-- which routes and metadata shapes matter
-- where latency and bottlenecks appear
-
-### Phase 5: Add Go Performance Value
-
-Only after the basics work:
-
-- goroutines
-- worker pools
-- retries
-- caching
-- prefetching
-- prioritized fetching
-- connection reuse
-
 ## Repository Layout
 
 ```text
