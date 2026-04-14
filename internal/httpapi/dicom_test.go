@@ -94,3 +94,4 @@ func TestDicomHandler_FileNotFound(t *testing.T) {
 		t.Fatalf("expected %d, got %d", http.StatusNotFound, w.Code)
 	}
 }
+

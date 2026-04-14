@@ -81,3 +81,4 @@ func dicomHandler(dicomFilePath string) http.HandlerFunc {
 		http.ServeContent(w, r, filename, info.ModTime(), file)
 	}
 }
+
