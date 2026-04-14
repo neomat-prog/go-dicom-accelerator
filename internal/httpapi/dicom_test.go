@@ -55,3 +55,42 @@ func TestDicomMetadataHandler_FileExists(t *testing.T) {
 		t.Fatalf("expected all UIDs to be non-empty, got %+v", got)
 	}
 }
+
+func TestDicomHandler_FileOpens(t *testing.T) {
+	handler := dicomHandler("testdata/test.dcm")
+
+	req := httptest.NewRequest(http.MethodGet, "/dicom", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, w.Code)
+	}
+
+	if ct := w.Header().Get("Content-Type"); ct != "application/dicom" {
+		t.Fatalf("expected Content-Type application/dicom, got %q", ct)
+	}
+
+	cd := w.Header().Get("Content-Disposition")
+	if !strings.Contains(cd, `filename="test.dcm"`) {
+		t.Fatalf("expected Content-Disposition filename test.dcm, got %q", cd)
+	}
+
+	if w.Body.Len() == 0 {
+		t.Fatalf("expected non-empty body")
+	}
+}
+
+func TestDicomHandler_FileNotFound(t *testing.T) {
+	handler := dicomHandler("testdata/does-not-exist.dcm")
+
+	req := httptest.NewRequest(http.MethodGet, "/dicom", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected %d, got %d", http.StatusNotFound, w.Code)
+	}
+}
