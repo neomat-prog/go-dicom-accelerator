@@ -38,8 +38,11 @@ type DICOMMetadata struct {
 }
 
 func dicomMetadataHandler(dicomFilePath string) http.HandlerFunc {
+
+	// returns metadata from the DICOM file
 	return func(w http.ResponseWriter, r *http.Request) {
 		metadata, err := readDicomMetadata(dicomFilePath)
+		// an error has occurred
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -78,3 +81,4 @@ func dicomHandler(dicomFilePath string) http.HandlerFunc {
 		http.ServeContent(w, r, filename, info.ModTime(), file)
 	}
 }
+
