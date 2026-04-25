@@ -1,30 +1,123 @@
-# go-dicom-gateway
+# DICOM Retrieval Accelerator
 
 [![Go Version](https://img.shields.io/badge/Go-1.26.2-00ADD8?logo=go&logoColor=white)](./go.mod)
-[![Project Status](https://img.shields.io/badge/status-in%20progress-0f766e)](./AGENT.md)
-[![OHIF Gateway](https://img.shields.io/badge/OHIF-DICOM%20gateway-1d4ed8)](./AGENT.md)
+[![Status](https://img.shields.io/badge/status-library%20first%20WIP-0f766e)](#status)
+[![GCP](https://img.shields.io/badge/GCP-DICOM%20retrieval-1d4ed8)](#target-architecture)
 
-<img align="right" width="200" src="./assets/gopher.png" alt="Go DICOM Gateway project visual">
+<img align="right" width="200" src="./assets/gopher.png" alt="DICOM Retrieval Accelerator project visual">
 
-### Go HTTP service for serving DICOM instances and metadata today, and growing into an OHIF-facing imaging gateway backed by GCP services
+### A Go project for fast, concurrent DICOM retrieval, starting with GCP-backed imaging workflows.
 
-This project provides a simple Go backend for DICOM delivery workflows.
+This repository is being shaped into a library-first project for downloading
+DICOM instances faster by using bounded concurrent requests, streaming,
+retry-aware fetching, and source adapters.
 
-It currently provides:
-- a health endpoint for service checks
-- a local-file-backed DICOM instance endpoint
-- a DICOM metadata endpoint for study, series, and instance UIDs
-- a clean starting point for later OHIF, GCS, and Healthcare API integration
+The current codebase is still a small HTTP gateway that serves one local DICOM
+file and exposes basic metadata. That gateway is useful as a working example,
+but the long-term reusable value is the retrieval engine underneath it.
 
-The intended flow for this repository is:
+## Project Direction
 
-`OHIF Viewer -> Go backend -> GCP Healthcare API / Cloud Storage`
+The intended open-source shape is:
 
-Right now the service is intentionally small. The goal is to build the platform in layers: first local retrieval and correct HTTP behavior, then cloud-backed retrieval, then OHIF integration, and only after that performance work such as caching, retries, prefetching, and concurrency-oriented optimizations.
+- a public Go library for concurrent DICOM retrieval
+- a GCP Healthcare API / DICOM Store adapter
+- a local file adapter for development and tests
+- an optional OHIF-facing gateway example
+- benchmarks for sequential vs concurrent retrieval
+
+In practical terms:
+
+```text
+OHIF Viewer / Go App
+        |
+        v
+DICOM Retrieval Accelerator
+        |
+        +-- GCP Healthcare API / DICOM Store
+        +-- Cloud Storage
+        +-- local files
+        +-- future DICOMweb-compatible sources
+```
+
+## Why This Exists
+
+Medical image studies often contain many DICOM instances. Fetching those
+instances one by one can make viewer startup and study loading painfully slow,
+especially when the source is remote cloud storage or a cloud DICOM store.
+
+This project is intended to provide a focused Go library that can:
+
+- fetch many DICOM instances concurrently
+- cap concurrency so callers do not overload a backend
+- stream data instead of buffering whole studies unnecessarily
+- support cancellation with `context.Context`
+- retry transient cloud or network failures
+- expose useful metadata for study, series, and instance workflows
+- plug into GCP first, while keeping the core library source-agnostic
+
+## Status
+
+This is an early foundation project.
+
+Implemented today:
+
+- `GET /healthz`
+- `GET /dicom`
+- `GET /dicom/metadata`
+- local-file-backed DICOM serving
+- metadata parsing for Study Instance UID, Series Instance UID, and SOP Instance UID
+
+Not implemented yet:
+
+- public importable retrieval package
+- concurrent study or series downloads
+- GCP Healthcare API adapter
+- GCS adapter
+- DICOMweb route compatibility
+- benchmark suite
+- production OHIF integration
+
+## Target Architecture
+
+The planned library boundary should look roughly like this:
+
+```go
+type InstanceRef struct {
+    StudyUID    string
+    SeriesUID   string
+    InstanceUID string
+}
+
+type Source interface {
+    FetchInstance(ctx context.Context, ref InstanceRef) (io.ReadCloser, Metadata, error)
+}
+
+type Fetcher struct {
+    Source      Source
+    Concurrency int
+    RetryPolicy RetryPolicy
+}
+```
+
+The HTTP gateway should call this library. It should not be the main product.
+
+Proposed package layout:
+
+```text
+cmd/server/                  current demo gateway entrypoint
+dicomfetch/                  future public retrieval library
+dicomfetch/gcphealthcare/    future GCP Healthcare API adapter
+dicomfetch/gcs/              future Cloud Storage adapter
+dicomfetch/local/            future local file adapter
+internal/config/             gateway configuration
+internal/httpapi/            gateway HTTP handlers
+assets/                      README assets
+```
 
 ## Installation
 
-Clone the repository and download the Go dependencies:
+Clone the repository and download dependencies:
 
 ```bash
 git clone git@github.com:neomat-prog/DICOM-Retrieval-Accelerator.git
@@ -32,7 +125,15 @@ cd DICOM-Retrieval-Accelerator
 go mod download
 ```
 
-## Usage
+The current Go module path is:
+
+```text
+github.com/neomat-prog/go-dicom-gateway
+```
+
+That module path may change if the repository is renamed around the library.
+
+## Running The Current Gateway
 
 Create a `.env` file in the repository root:
 
@@ -46,11 +147,15 @@ Start the server:
 go run ./cmd/server
 ```
 
-The server listens on `http://localhost:8080`.
+The server listens on:
 
-## API
+```text
+http://localhost:8080
+```
 
-The current server exposes the following routes:
+## Current API
+
+The current gateway exposes:
 
 ```text
 GET /healthz
@@ -58,7 +163,7 @@ GET /dicom
 GET /dicom/metadata
 ```
 
-### Example requests
+Example requests:
 
 ```bash
 curl http://localhost:8080/healthz
@@ -66,15 +171,13 @@ curl http://localhost:8080/dicom/metadata
 curl -OJ http://localhost:8080/dicom
 ```
 
-### Example responses
-
-`GET /healthz`
+Example health response:
 
 ```json
 {"status":"ok"}
 ```
 
-`GET /dicom/metadata`
+Example metadata response:
 
 ```json
 {
@@ -84,31 +187,10 @@ curl -OJ http://localhost:8080/dicom
 }
 ```
 
-## What It Does Today
+## Planned Gateway Routes
 
-The codebase currently includes:
-
-- `cmd/server/main.go` as the application entrypoint
-- `internal/config/config.go` for loading configuration from `.env`
-- `internal/httpapi/routes.go` for route registration
-- `internal/httpapi/dicom.go` for serving the configured DICOM file
-- `internal/httpapi/dicom_metadata.go` for parsing and returning core DICOM identifiers
-
-This is a foundation project, not the final architecture.
-
-## Target Architecture
-
-The practical target shape for the project is:
-
-1. OHIF sends requests to this Go service.
-2. The service validates requests and formats responses.
-3. The service fetches DICOM data from a backing source.
-4. The backing source starts as local disk, then moves to GCS or GCP Healthcare API / DICOM Store.
-5. The service returns data in a format OHIF can consume.
-
-## Likely Future Endpoints
-
-These routes are not implemented yet, but they match the direction already outlined in the code and project notes:
+These routes are not implemented yet, but they match the intended OHIF-facing
+gateway direction:
 
 ```text
 GET /studies
@@ -118,28 +200,30 @@ GET /studies/{studyUID}/series/{seriesUID}/instances
 GET /studies/{studyUID}/series/{seriesUID}/instances/{instanceUID}
 ```
 
-## Repository Layout
+## Roadmap
 
-```text
-cmd/server/             application entrypoint
-internal/config/        environment and config loading
-internal/httpapi/       HTTP handlers and routing
-docs/assets/            README visuals
-```
+Near-term work:
 
-## Notes
+- extract retrieval concepts out of `internal/httpapi`
+- introduce a public `dicomfetch` package
+- add a bounded concurrent fetcher
+- add local-source tests that do not depend on cloud credentials
+- define the GCP Healthcare API adapter boundary
+- add retries, cancellation, and timeout behavior
+- document expected OHIF request and response contracts
 
-- The service currently serves a single configured DICOM file from local disk.
-- GCP Healthcare API and Cloud Storage integration are planned, not implemented yet.
-- The current engineering direction favors small handlers, explicit routing, and readable data flow over early abstractions.
+Later work:
 
-## Contribute
+- implement GCP Healthcare API / DICOM Store fetching
+- implement Cloud Storage fetching
+- add benchmark results for sequential vs concurrent retrieval
+- add structured logging and basic metrics hooks
+- add DICOMweb-compatible route helpers where useful
 
-Contributions are welcome. Good near-term improvements include:
+## Contributing
 
-- refining route structure
-- improving handler behavior and validation
-- adding request parameters for file selection
-- introducing retrieval service layers
-- preparing the codebase for GCP-backed fetches
-- documenting the OHIF-facing contract
+Contributions are welcome, especially around retrieval APIs, concurrency
+behavior, GCP integration, tests, and documentation.
+
+This project should stay small, practical, and library-first: the gateway exists
+to prove the retrieval layer works.
