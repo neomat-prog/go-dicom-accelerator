@@ -28,7 +28,7 @@ func TestLoad_UsesDefaultDotEnvAndResolvesRelativePath(t *testing.T) {
 	}
 
 	want := filepath.Clean(dicomPath)
-	if cfg.DICOMFilePath != want {
+	if !samePath(t, cfg.DICOMFilePath, want) {
 		t.Fatalf("want %q, got %q", want, cfg.DICOMFilePath)
 	}
 }
@@ -158,4 +158,20 @@ func writeFile(t *testing.T, path, contents string) {
 	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func samePath(t *testing.T, got, want string) bool {
+	t.Helper()
+
+	gotPath, gotErr := filepath.EvalSymlinks(got)
+	if gotErr != nil {
+		t.Fatalf("resolve %s: %v", got, gotErr)
+	}
+
+	wantPath, wantErr := filepath.EvalSymlinks(want)
+	if wantErr != nil {
+		t.Fatalf("resolve %s: %v", want, wantErr)
+	}
+
+	return filepath.Clean(gotPath) == filepath.Clean(wantPath)
 }

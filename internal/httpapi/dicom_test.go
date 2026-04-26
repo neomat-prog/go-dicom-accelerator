@@ -4,8 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/suyashkumar/dicom"
+	dicomtag "github.com/suyashkumar/dicom/pkg/tag"
+	"github.com/suyashkumar/dicom/pkg/uid"
 )
 
 func TestDicomMetadataHandler_FileNotFound(t *testing.T) {
@@ -31,7 +37,7 @@ func TestDicomMetadataHandler_FileNotFound(t *testing.T) {
 }
 
 func TestDicomMetadataHandler_FileExists(t *testing.T) {
-	handler := dicomMetadataHandler("testdata/test.dcm")
+	handler := dicomMetadataHandler(testDICOMFile(t))
 
 	req := httptest.NewRequest(http.MethodGet, "/dicom/metadata", nil)
 	w := httptest.NewRecorder()
@@ -57,7 +63,7 @@ func TestDicomMetadataHandler_FileExists(t *testing.T) {
 }
 
 func TestDicomHandler_FileOpens(t *testing.T) {
-	handler := dicomHandler("testdata/test.dcm")
+	handler := dicomHandler(testDICOMFile(t))
 
 	req := httptest.NewRequest(http.MethodGet, "/dicom", nil)
 	w := httptest.NewRecorder()
@@ -82,6 +88,46 @@ func TestDicomHandler_FileOpens(t *testing.T) {
 	}
 }
 
+func testDICOMFile(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "test.dcm")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create %s: %v", path, err)
+	}
+
+	ds := dicom.Dataset{Elements: []*dicom.Element{
+		newDICOMElement(t, dicomtag.MediaStorageSOPClassUID, []string{"1.2.840.10008.5.1.4.1.1.7"}),
+		newDICOMElement(t, dicomtag.MediaStorageSOPInstanceUID, []string{"1.2.826.0.1.3680043.10.543.1"}),
+		newDICOMElement(t, dicomtag.TransferSyntaxUID, []string{uid.ImplicitVRLittleEndian}),
+		newDICOMElement(t, dicomtag.StudyInstanceUID, []string{"1.2.826.0.1.3680043.10.543.2"}),
+		newDICOMElement(t, dicomtag.SeriesInstanceUID, []string{"1.2.826.0.1.3680043.10.543.3"}),
+		newDICOMElement(t, dicomtag.SOPInstanceUID, []string{"1.2.826.0.1.3680043.10.543.4"}),
+	}}
+
+	if err := dicom.Write(file, ds); err != nil {
+		t.Fatalf("write dicom %s: %v", path, err)
+	}
+
+	if err := file.Close(); err != nil {
+		t.Fatalf("close %s: %v", path, err)
+	}
+
+	return path
+}
+
+func newDICOMElement(t *testing.T, elementTag dicomtag.Tag, value any) *dicom.Element {
+	t.Helper()
+
+	elem, err := dicom.NewElement(elementTag, value)
+	if err != nil {
+		t.Fatalf("new dicom element %v: %v", elementTag, err)
+	}
+
+	return elem
+}
+
 func TestDicomHandler_FileNotFound(t *testing.T) {
 	handler := dicomHandler("testdata/does-not-exist.dcm")
 
@@ -94,4 +140,3 @@ func TestDicomHandler_FileNotFound(t *testing.T) {
 		t.Fatalf("expected %d, got %d", http.StatusNotFound, w.Code)
 	}
 }
-
