@@ -13,6 +13,7 @@ import (
 
 	"github.com/neomat-prog/go-dicom-gateway/internal/config"
 	"github.com/neomat-prog/go-dicom-gateway/internal/httpapi"
+	"github.com/neomat-prog/go-dicom-gateway/source"
 )
 
 func main() {
@@ -21,9 +22,11 @@ func main() {
 		log.Fatal(err)
 	}
 
+	src := source.NewLocal(cfg.DICOMFilePath)
+
 	server := &http.Server{
 		Addr:    ":8080",
-		Handler: httpapi.NewMux(cfg.DICOMFilePath),
+		Handler: httpapi.NewMux(src),
 	}
 
 	log.Println("Starting server on :8080")

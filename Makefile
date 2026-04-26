@@ -6,7 +6,7 @@ SERVER := ./cmd/server
 
 all: test build
 
-run: build
+run:
 	$(GO) run $(SERVER)
 
 test:

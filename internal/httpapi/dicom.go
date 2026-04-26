@@ -6,9 +6,11 @@ package httpapi
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
-	"os"
-	"path/filepath"
+	"strconv"
+
+	"github.com/neomat-prog/go-dicom-gateway/source"
 )
 
 // TODO(neomat-prog) 12.04.26: Create a proper endpoint for fetching and serving DICOM files.
@@ -31,20 +33,11 @@ handlers that call those layers
 
 */
 
-type DICOMMetadata struct {
-	StudyInstanceUID  string `json:"studyInstanceUID"`
-	SeriesInstanceUID string `json:"seriesInstanceUID"`
-	SOPInstanceUID    string `json:"sopInstanceUID"`
-}
-
-func dicomMetadataHandler(dicomFilePath string) http.HandlerFunc {
-
-	// returns metadata from the DICOM file
+func dicomMetadataHandler(src source.Source) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		metadata, err := readDicomMetadata(dicomFilePath)
-		// an error has occurred
+		metadata, err := src.StudyMetadata(r.Context(), "")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeSourceError(w, err)
 			return
 		}
 
@@ -58,27 +51,39 @@ func dicomMetadataHandler(dicomFilePath string) http.HandlerFunc {
 	}
 }
 
-func dicomHandler(dicomFilePath string) http.HandlerFunc {
+func dicomHandler(src source.Source) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		file, err := os.Open(dicomFilePath)
+		resp, err := src.Instance(r.Context(), source.InstanceRef{})
 		if err != nil {
-			http.Error(w, "file not found", http.StatusNotFound)
+			writeSourceError(w, err)
 			return
 		}
-		defer file.Close()
+		defer resp.Body.Close()
 
-		info, err := file.Stat()
-		if err != nil {
-			http.Error(w, "could not get file info", http.StatusInternalServerError)
-			return
+		w.Header().Set("Content-Type", resp.ContentType)
+		w.Header().Set("Content-Disposition", "inline; filename="+strconv.Quote(resp.Filename))
+
+		if resp.ContentLength >= 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
 		}
 
-		filename := filepath.Base(dicomFilePath)
+		w.WriteHeader(http.StatusOK)
 
-		w.Header().Set("Content-Type", "application/dicom")
-		w.Header().Set("Content-Disposition", `inline; filename="`+filename+`"`)
-
-		http.ServeContent(w, r, filename, info.ModTime(), file)
+		if _, err := io.Copy(w, resp.Body); err != nil {
+			return
+		}
 	}
 }
 
+func writeSourceError(w http.ResponseWriter, err error) {
+	switch {
+	case source.IsKind(err, source.ErrorKindBadRequest):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case source.IsKind(err, source.ErrorKindNotFound):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	case source.IsKind(err, source.ErrorKindNotAcceptable):
+		http.Error(w, err.Error(), http.StatusNotAcceptable)
+	default:
+		http.Error(w, err.Error(), http.StatusBadGateway)
+	}
+}

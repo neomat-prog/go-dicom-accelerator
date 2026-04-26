@@ -2,28 +2,35 @@ package source
 
 import (
 	"context"
-	"io"
 	"errors"
+	"io"
 )
 
 // TODO(neomat-prog) maybe change this to InstanceUID?
 
-type InstanceID struct{
-	StudyInstanceUID string
+type InstanceRef struct {
+	StudyInstanceUID  string
 	SeriesInstanceUID string
-	SOPInstanceUID string
+	SOPInstanceUID    string
+}
+
+type Metadata struct {
+	StudyInstanceUID  string `json:"studyInstanceUID"`
+	SeriesInstanceUID string `json:"seriesInstanceUID"`
+	SOPInstanceUID    string `json:"sopInstanceUID"`
 }
 
 // convention to use ContentLength = -1 when length is unknown
 type Response struct {
-	Body io.ReadCloser
-	ContentType string
+	Body          io.ReadCloser
+	ContentType   string
 	ContentLength int64
+	Filename      string
 }
 
 type Source interface {
-	StudyMetadata(ctx context.Context, studyUID string) (Response, error)
- 	Instance(ctx context.Context, id InstanceID) (Response, error)
+	StudyMetadata(ctx context.Context, studyUID string) (Metadata, error)
+	Instance(ctx context.Context, ref InstanceRef) (Response, error)
 }
 
 type ErrorKind string
@@ -71,4 +78,3 @@ func IsKind(err error, kind ErrorKind) bool {
 	}
 	return target.Kind == kind
 }
-
