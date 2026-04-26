@@ -68,15 +68,17 @@ Implemented today:
 - local-file-backed DICOM serving
 - metadata parsing for Study Instance UID, Series Instance UID, and SOP Instance UID
 
-Not implemented yet:
+## Not Implemented Yet
 
-- public importable retrieval package
-- concurrent study or series downloads
-- GCP Healthcare API adapter
-- GCS adapter
-- DICOMweb route compatibility
-- benchmark suite
-- production OHIF integration
+| Feature                                   | Description |
+|------------------------------------------|-------------|
+| Public importable retrieval package      | A reusable Go package for external use |
+| Concurrent study or series downloads     | Parallel fetching of multiple DICOM instances |
+| GCP Healthcare API adapter              | Integration with GCP DICOM Store |
+| GCS adapter                             | Support for Google Cloud Storage sources |
+| DICOMweb route compatibility            | Standard DICOMweb API support |
+| Benchmark suite                         | Performance comparisons (sequential vs concurrent) |
+| Production OHIF integration             | Full integration with OHIF viewer workflows |
 
 ## Target Architecture
 
