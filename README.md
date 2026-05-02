@@ -40,6 +40,41 @@ DICOM Retrieval Accelerator
         +-- future DICOMweb-compatible sources
 ```
 
+## Core Idea: Server-Side Sliding Windows
+
+OHIF and other web viewers often request DICOM instances one at a time while
+the user scrolls through a series. That is simple for the viewer, but it can be
+slow when every browser request has to wait for a remote cloud object or DICOM
+Store request.
+
+This project is meant to sit between the viewer and the storage backend:
+
+```text
+OHIF asks for instance 40
+Gateway returns instance 40
+Gateway prefetches 41-56 and keeps 36-39 warm
+Next OHIF request is served from the gateway cache instead of cold GCP storage
+```
+
+That does not remove every concurrency limit in the system. GCP quotas, backend
+network capacity, and the browser-to-gateway connection still matter. The
+useful shift is that expensive remote retrieval is moved to Go, where the
+library can use bounded concurrency, retries, caching, cancellation, and
+sliding-window prefetching in a controlled way.
+
+The library boundary is intentionally customizable:
+
+- `source.Source` adapters know how to fetch from GCP, GCS, PACS, local disk, or
+  a custom archive.
+- `dicomfetch.Fetcher` is the planned home for the acceleration strategy:
+  bounded concurrency, window selection, request timeouts, and caching.
+- `internal/httpapi` is only the gateway example that exposes this behavior to
+  HTTP clients like OHIF.
+
+The goal is a win-win shape: OHIF can keep its normal instance-by-instance
+request model, while the server turns that access pattern into efficient
+backend retrieval.
+
 ## Why This Exists
 
 Medical image studies often contain many DICOM instances. Fetching those
@@ -67,13 +102,15 @@ Implemented today:
 - `GET /dicom/metadata`
 - local-file-backed DICOM serving
 - metadata parsing for Study Instance UID, Series Instance UID, and SOP Instance UID
+- minimal `dicomfetch` package with `Options` and `Fetcher` placeholders
 
 ## Not Implemented Yet
 
 | Feature                                   | Description |
 |------------------------------------------|-------------|
 | Public importable retrieval package      | A reusable Go package for external use |
-| Concurrent study or series downloads     | Parallel fetching of multiple DICOM instances |
+| Sliding-window fetcher                  | Bounded concurrent prefetch around the requested instance |
+| Production study or series downloads     | Disk-backed or stream-oriented fetching of multiple DICOM instances |
 | GCP Healthcare API adapter              | Integration with GCP DICOM Store |
 | GCS adapter                             | Support for Google Cloud Storage sources |
 | DICOMweb route compatibility            | Standard DICOMweb API support |
@@ -103,6 +140,41 @@ type Fetcher struct {
 ```
 
 The HTTP gateway should call this library. It should not be the main product.
+
+The `dicomfetch` package is intentionally minimal right now. A future version
+should grow toward this kind of use:
+
+```go
+options := dicomfetch.Options{
+    MaxConcurrency: 8,
+    BatchSize: 32,
+    RequestTimeout: 15 * time.Second,
+}
+
+fetcher := dicomfetch.Fetcher{
+    Source: src,
+    Options: options,
+}
+
+// orderedSeries must be sorted in the same order the viewer scrolls through it.
+window, err := fetcher.FetchWindow(ctx, orderedSeries, requestedIndex)
+if err != nil {
+    return err
+}
+
+for _, resp := range window {
+    defer resp.Body.Close()
+    // Stream or cache resp.Body.
+}
+```
+
+For a beginner-friendly mental model:
+
+```text
+Source  = "I know where the DICOM bytes live."
+Fetcher = "I know which nearby instances to fetch and how many at once."
+Gateway = "I translate OHIF/DICOMweb HTTP requests into fetcher calls."
+```
 
 Proposed package layout:
 
@@ -207,12 +279,47 @@ GET /studies/{studyUID}/series/{seriesUID}/instances/{instanceUID}
 Near-term work:
 
 - extract retrieval concepts out of `internal/httpapi`
-- introduce a public `dicomfetch` package
-- add a bounded concurrent fetcher
+- create a `dicomfetch.SelectWindow` helper
+- create a `dicomfetch.FetchInstance` method
+- create a `dicomfetch.FetchWindow` method first sequentially, then with bounded concurrency
+- add a production-ready cache behind the fetcher
 - add local-source tests that do not depend on cloud credentials
 - define the GCP Healthcare API adapter boundary
 - add retries, cancellation, and timeout behavior
 - document expected OHIF request and response contracts
+
+## Learning Path For Building This Project
+
+If you are newer to Go, build this in small layers:
+
+1. Understand `source.Source`.
+   This is an interface. Any adapter only needs to satisfy the methods in
+   `source/source.go`.
+
+2. Create a `dicomfetch.SelectWindow` helper.
+   This should be pure slice math. Given an ordered series and a current index,
+   it returns the nearby instances that should be warmed.
+
+3. Create `dicomfetch.FetchWindow` sequentially.
+   Before adding goroutines, make it fetch the selected window one instance at a
+   time. Simple first, fast second.
+
+4. Add bounded concurrency.
+   This is the first concurrency lesson. Use goroutines plus a buffered channel
+   as a semaphore so only `MaxConcurrency` backend fetches run at once.
+
+5. Add caching.
+   Real DICOM studies can be large, so start with a tiny memory cache for
+   learning, then evolve it toward a size-limited memory cache, disk cache, or
+   streaming cache.
+
+6. Add a real adapter.
+   Start with local files, then implement GCP Healthcare API or GCS behind the
+   same `source.Source` interface.
+
+7. Make the gateway OHIF-compatible.
+   The HTTP layer should translate OHIF/DICOMweb requests into `InstanceRef`
+   values and ordered series lists, then let `dicomfetch` do the acceleration.
 
 Later work:
 
