@@ -1,6 +1,7 @@
 package dicomfetch
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -27,6 +28,9 @@ type Options struct {
 type Fetcher struct {
 	Source  source.Source
 	Options Options
+
+	mu    sync.Mutex
+	cache map[string]FetchedInstance
 }
 
 func DefaultOptions() Options {
@@ -62,6 +66,24 @@ func New(src source.Source, options Options) *Fetcher {
 	return &Fetcher{
 		Source:  src,
 		Options: options.Normalize(),
+		cache:   make(map[string]FetchedInstance),
+	}
+}
+
+type FetchedInstance struct {
+	Ref           source.InstanceRef
+	ContentType   string
+	ContentLength int64
+	Filename      string
+	Data          []byte
+}
+
+func (i FetchedInstance) Response() source.Response {
+	return source.Response{
+		Body:          io.NopCloser(bytes.NewReader(i.Data)),
+		ContentType:   i.ContentType,
+		ContentLength: int64(len(i.Data)),
+		Filename:      i.Filename,
 	}
 }
 
@@ -111,25 +133,51 @@ func SelectWindow(refs []source.InstanceRef, center int, behind int, ahead int) 
 	return window, nil
 }
 
-func (f *Fetcher) FetchInstance(ctx context.Context, ref source.InstanceRef) (source.Response, error) {
+func (f *Fetcher) FetchInstance(ctx context.Context, ref source.InstanceRef) (FetchedInstance, error) {
 	if f == nil {
-		return source.Response{}, errors.New("fetcher cannot be nil")
+		return FetchedInstance{}, errors.New("fetcher cannot be nil")
 	}
 
 	if f.Source == nil {
-		return source.Response{}, errors.New("fetcher source cannot be nil")
+		return FetchedInstance{}, errors.New("fetcher source cannot be nil")
 	}
 
-	if f.Options.RequestTimeout > 0 {
+	if got, ok := f.getCached(ref); ok {
+		return got, nil
+	}
+
+	options := f.Options.Normalize()
+
+	if options.RequestTimeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, f.Options.RequestTimeout)
+		ctx, cancel = context.WithTimeout(ctx, options.RequestTimeout)
 		defer cancel()
 	}
 
-	return f.Source.Instance(ctx, ref)
+	resp, err := f.Source.Instance(ctx, ref)
+	if err != nil {
+		return FetchedInstance{}, err
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return FetchedInstance{}, err
+	}
+
+	got := FetchedInstance{
+		Ref:           ref,
+		ContentType:   resp.ContentType,
+		ContentLength: int64(len(data)),
+		Filename:      resp.Filename,
+		Data:          data,
+	}
+
+	f.setCached(got)
+	return cloneFetchedInstance(got), nil
 }
 
-func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, center int) ([]source.Response, error) {
+func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, center int) ([]FetchedInstance, error) {
 
 	if f == nil {
 		return nil, errors.New("dicomfetch: nil fetcher")
@@ -146,17 +194,17 @@ func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, ce
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	responses := make([]source.Response, len(window))
+	instances := make([]FetchedInstance, len(window))
 	sem := make(chan struct{}, options.MaxConcurrency)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var errs []error
-
+outer:
 	for i, ref := range window {
 		select {
 		case <-ctx.Done():
-			break
+			break outer
 		case sem <- struct{}{}:
 		}
 
@@ -166,7 +214,7 @@ func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, ce
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			resp, err := f.FetchInstance(ctx, ref)
+			instance, err := f.FetchInstance(ctx, ref)
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("fetch instance %q: %w", ref.SOPInstanceUID, err))
@@ -176,32 +224,22 @@ func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, ce
 				return
 			}
 
-			responses[i] = resp
+			instances[i] = instance
 		}(i, ref)
 	}
 
 	wg.Wait()
 
 	if len(errs) > 0 {
-		closeResponses(responses)
 		return nil, errors.Join(errs...)
 	}
 
 	if err := ctx.Err(); err != nil {
-		closeResponses(responses)
 		return nil, err
 	}
 
-	return responses, nil
+	return instances, nil
 
-}
-
-func closeResponses(responses []source.Response) {
-	for _, resp := range responses {
-		if resp.Body != nil {
-			_ = resp.Body.Close()
-		}
-	}
 }
 
 func ReadAllAndClose(resp source.Response) ([]byte, error) {
@@ -211,4 +249,35 @@ func ReadAllAndClose(resp source.Response) ([]byte, error) {
 	defer resp.Body.Close()
 
 	return io.ReadAll(resp.Body)
+}
+
+func (f *Fetcher) getCached(ref source.InstanceRef) (FetchedInstance, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	got, ok := f.cache[cacheKey(ref)]
+	if !ok {
+		return FetchedInstance{}, false
+	}
+	return cloneFetchedInstance(got), true
+}
+
+func (f *Fetcher) setCached(instance FetchedInstance) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.cache == nil {
+		f.cache = make(map[string]FetchedInstance)
+	}
+
+	f.cache[cacheKey(instance.Ref)] = cloneFetchedInstance(instance)
+}
+
+func cloneFetchedInstance(instance FetchedInstance) FetchedInstance {
+	instance.Data = append([]byte(nil), instance.Data...)
+	return instance
+}
+
+func cacheKey(ref source.InstanceRef) string {
+	return ref.StudyInstanceUID + "\x00" + ref.SeriesInstanceUID + "\x00" + ref.SOPInstanceUID
 }
