@@ -1,0 +1,254 @@
+package source
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/suyashkumar/dicom"
+	dicomtag "github.com/suyashkumar/dicom/pkg/tag"
+)
+
+type LocalDirectorySource struct {
+	Root string
+}
+
+func NewLocalDirectory(root string) *LocalDirectorySource {
+	return &LocalDirectorySource{Root: root}
+}
+
+func (s *LocalDirectorySource) StudyMetadata(ctx context.Context, studyUID string) (Metadata, error) {
+	instances, err := s.SeriesInstances(ctx, studyUID, "")
+	if err != nil {
+		return Metadata{}, err
+	}
+
+	ref := instances[0].Ref
+
+	return Metadata{
+		StudyInstanceUID:  ref.StudyInstanceUID,
+		SeriesInstanceUID: ref.SeriesInstanceUID,
+		SOPInstanceUID:    ref.SOPInstanceUID,
+	}, nil
+}
+
+func (s *LocalDirectorySource) SeriesInstances(ctx context.Context, studyUID string, seriesUID string) ([]InstanceInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	paths, err := dicomFilePaths(s.Root)
+	if err != nil {
+		return nil, err
+	}
+
+	var instances []InstanceInfo
+
+	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		info, err := readLocalInstanceInfo(path)
+		if err != nil {
+			return nil, Wrap(ErrorKindUpstream, err)
+		}
+
+		ref := info.Ref
+
+		if studyUID != "" && ref.StudyInstanceUID != studyUID {
+			continue
+		}
+
+		if seriesUID != "" && ref.SeriesInstanceUID != seriesUID {
+			continue
+		}
+
+		instances = append(instances, info)
+	}
+
+	if len(instances) == 0 {
+		return nil, Wrap(ErrorKindNotFound, fmt.Errorf("series not found"))
+	}
+
+	sort.SliceStable(instances, func(i, j int) bool {
+		left := instances[i]
+		right := instances[j]
+
+		if left.HasInstanceNumber && right.HasInstanceNumber {
+			if left.InstanceNumber != right.InstanceNumber {
+				return left.InstanceNumber < right.InstanceNumber
+			}
+		}
+
+		if left.HasInstanceNumber != right.HasInstanceNumber {
+			return left.HasInstanceNumber
+		}
+
+		return left.Ref.SOPInstanceUID < right.Ref.SOPInstanceUID
+	})
+
+	return instances, nil
+}
+
+func (s *LocalDirectorySource) Instance(ctx context.Context, ref InstanceRef) (Response, error) {
+	if err := ctx.Err(); err != nil {
+		return Response{}, err
+	}
+
+	paths, err := dicomFilePaths(s.Root)
+	if err != nil {
+		return Response{}, err
+	}
+
+	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return Response{}, err
+		}
+
+		info, err := readLocalInstanceInfo(path)
+		if err != nil {
+			return Response{}, Wrap(ErrorKindUpstream, err)
+		}
+
+		if !matchesRef(info.Ref, ref) {
+			continue
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return Response{}, Wrap(ErrorKindNotFound, err)
+			}
+			return Response{}, Wrap(ErrorKindUpstream, err)
+		}
+
+		stat, err := file.Stat()
+		if err != nil {
+			file.Close()
+			return Response{}, Wrap(ErrorKindUpstream, err)
+		}
+
+		return Response{
+			Body:          file,
+			ContentType:   "application/dicom",
+			ContentLength: stat.Size(),
+			Filename:      filepath.Base(path),
+		}, nil
+	}
+
+	return Response{}, Wrap(ErrorKindNotFound, fmt.Errorf("instance not found"))
+}
+
+func dicomFilePaths(root string) ([]string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, Wrap(ErrorKindNotFound, err)
+		}
+		return nil, Wrap(ErrorKindUpstream, err)
+	}
+
+	var paths []string
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		if strings.ToLower(filepath.Ext(entry.Name())) != ".dcm" {
+			continue
+		}
+
+		paths = append(paths, filepath.Join(root, entry.Name()))
+	}
+
+	if len(paths) == 0 {
+		return nil, Wrap(ErrorKindNotFound, fmt.Errorf("no dicom files found in %s", root))
+	}
+
+	sort.Strings(paths)
+
+	return paths, nil
+}
+
+func readLocalInstanceInfo(path string) (InstanceInfo, error) {
+	ds, err := dicom.ParseFile(path, nil, dicom.SkipPixelData())
+	if err != nil {
+		return InstanceInfo{}, fmt.Errorf("parse dicom %s: %w", path, err)
+	}
+
+	studyUID, err := readStringTag(ds, dicomtag.StudyInstanceUID)
+	if err != nil {
+		return InstanceInfo{}, err
+	}
+
+	seriesUID, err := readStringTag(ds, dicomtag.SeriesInstanceUID)
+	if err != nil {
+		return InstanceInfo{}, err
+	}
+
+	instanceUID, err := readStringTag(ds, dicomtag.SOPInstanceUID)
+	if err != nil {
+		return InstanceInfo{}, err
+	}
+
+	instanceNumber, hasInstanceNumber, err := readOptionalIntTag(ds, dicomtag.InstanceNumber)
+	if err != nil {
+		return InstanceInfo{}, err
+	}
+
+	return InstanceInfo{
+		Ref: InstanceRef{
+			StudyInstanceUID:  studyUID,
+			SeriesInstanceUID: seriesUID,
+			SOPInstanceUID:    instanceUID,
+		},
+		InstanceNumber:    instanceNumber,
+		HasInstanceNumber: hasInstanceNumber,
+	}, nil
+}
+
+func readOptionalIntTag(ds dicom.Dataset, t dicomtag.Tag) (int, bool, error) {
+	elem, err := ds.FindElementByTag(t)
+	if err != nil {
+		return 0, false, nil
+	}
+
+	values := dicom.MustGetStrings(elem.Value)
+	if len(values) == 0 {
+		return 0, false, nil
+	}
+
+	raw := strings.TrimSpace(values[0])
+	if raw == "" {
+		return 0, false, nil
+	}
+
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, true, fmt.Errorf("tag %v has invalid integer value %q: %w", t, raw, err)
+	}
+
+	return n, true, nil
+}
+
+func matchesRef(got InstanceRef, want InstanceRef) bool {
+	if want.StudyInstanceUID != "" && got.StudyInstanceUID != want.StudyInstanceUID {
+		return false
+	}
+
+	if want.SeriesInstanceUID != "" && got.SeriesInstanceUID != want.SeriesInstanceUID {
+		return false
+	}
+
+	if want.SOPInstanceUID != "" && got.SOPInstanceUID != want.SOPInstanceUID {
+		return false
+	}
+
+	return true
+}
