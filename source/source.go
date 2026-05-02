@@ -14,6 +14,16 @@ type InstanceRef struct {
 	SOPInstanceUID    string
 }
 
+type InstanceInfo struct {
+	Ref               InstanceRef
+	InstanceNumber    int
+	HasInstanceNumber bool
+}
+
+type SeriesLister interface {
+	SeriesInstances(ctx context.Context, studyUID string, seriesUID string) ([]InstanceInfo, error)
+}
+
 type Metadata struct {
 	StudyInstanceUID  string `json:"studyInstanceUID"`
 	SeriesInstanceUID string `json:"seriesInstanceUID"`

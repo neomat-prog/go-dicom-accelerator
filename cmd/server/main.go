@@ -8,27 +8,69 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"time"
 
-	"github.com/neomat-prog/go-dicom-gateway/internal/config"
+	"github.com/neomat-prog/go-dicom-gateway/dicomfetch"
 	"github.com/neomat-prog/go-dicom-gateway/internal/httpapi"
 	"github.com/neomat-prog/go-dicom-gateway/source"
 )
 
+const serverAddr = ":8081"
+
 func main() {
-	cfg, err := config.Load(".env")
-	if err != nil {
+	ctx := context.Background()
+
+	src := source.NewLocalDirectory("sample-dicom/S1241164704480_images/series1.2.840.113619.2.452.3.413971022.862.1730716718.853.3")
+
+	if err := runAcceleratorSmokeTest(ctx, src); err != nil {
 		log.Fatal(err)
 	}
 
-	src := source.NewLocal(cfg.DICOMFilePath)
-
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    serverAddr,
 		Handler: httpapi.NewMux(src),
 	}
 
-	log.Println("Starting server on :8080")
+	log.Println("Starting server on", serverAddr)
 	log.Fatal(server.ListenAndServe())
+}
+
+func runAcceleratorSmokeTest(ctx context.Context, src *source.LocalDirectorySource) error {
+	instances, err := src.SeriesInstances(ctx, "", "")
+	if err != nil {
+		return err
+	}
+
+	refs := make([]source.InstanceRef, len(instances))
+	for i, info := range instances {
+		refs[i] = info.Ref
+	}
+
+	options := dicomfetch.DefaultOptions()
+	options.MaxConcurrency = 4
+	options.WindowBehind = 2
+	options.WindowAhead = 3
+	options.RequestTimeout = 30 * time.Second
+
+	fetcher := dicomfetch.New(src, options)
+	center := len(refs) / 2
+
+	window, err := fetcher.FetchWindow(ctx, refs, center)
+	if err != nil {
+		return err
+	}
+
+	totalBytes := 0
+	for _, instance := range window {
+		totalBytes += len(instance.Data)
+	}
+
+	log.Printf("Accelerator smoke test: series instances=%d", len(instances))
+	log.Printf("Accelerator smoke test: center index=%d sop=%s", center, refs[center].SOPInstanceUID)
+	log.Printf("Accelerator smoke test: fetched window=%d instances bytes=%d", len(window), totalBytes)
+
+	return nil
 }

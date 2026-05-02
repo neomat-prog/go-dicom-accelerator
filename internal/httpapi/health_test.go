@@ -6,10 +6,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/neomat-prog/go-dicom-gateway/source"
 )
 
 func TestHealth(t *testing.T) {
-	mux := NewMux("")
+	mux := newTestMux()
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -25,12 +27,12 @@ func TestHealth(t *testing.T) {
 	}
 
 	if !strings.Contains(w.Body.String(), "\"status\":\"ok\"") {
-        t.Fatalf("expected body to contain status ok, got %q", w.Body.String())
-    }
+		t.Fatalf("expected body to contain status ok, got %q", w.Body.String())
+	}
 }
 
 func TestHealth_MethodNotAllowed(t *testing.T) {
-	mux := NewMux("")
+	mux := newTestMux()
 
 	req := httptest.NewRequest(http.MethodPost, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -47,7 +49,7 @@ func TestHealth_MethodNotAllowed(t *testing.T) {
 }
 
 func TestHealth_ResponseJSONContract(t *testing.T) {
-	mux := NewMux("")
+	mux := newTestMux()
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -68,3 +70,6 @@ func TestHealth_ResponseJSONContract(t *testing.T) {
 	}
 }
 
+func newTestMux() *http.ServeMux {
+	return NewMux(source.NewLocal(""))
+}
