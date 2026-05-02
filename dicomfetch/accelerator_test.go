@@ -122,6 +122,35 @@ func TestFetchWindow_UsesBoundedConcurrency(t *testing.T) {
 	})
 }
 
+func TestFetchWindow_ConcurrentIsFasterThanSequentialWhenSourceHasLatency(t *testing.T) {
+	refs := testRefs(12)
+	delay := 25 * time.Millisecond
+
+	sequentialDuration := timedFetchWindow(t, &trackingSource{delay: delay}, Options{
+		MaxConcurrency: 1,
+		WindowBehind:   5,
+		WindowAhead:    6,
+		RequestTimeout: 2 * time.Second,
+	}, refs, 5)
+
+	concurrentDuration := timedFetchWindow(t, &trackingSource{delay: delay}, Options{
+		MaxConcurrency: 4,
+		WindowBehind:   5,
+		WindowAhead:    6,
+		RequestTimeout: 2 * time.Second,
+	}, refs, 5)
+
+	t.Logf("sequential duration=%s concurrent duration=%s", sequentialDuration, concurrentDuration)
+
+	if concurrentDuration >= sequentialDuration {
+		t.Fatalf("expected concurrent fetch to be faster than sequential fetch")
+	}
+
+	if concurrentDuration > sequentialDuration*3/4 {
+		t.Fatalf("expected concurrent fetch to be meaningfully faster: sequential=%s concurrent=%s", sequentialDuration, concurrentDuration)
+	}
+}
+
 type trackingSource struct {
 	mu        sync.Mutex
 	active    int
@@ -218,6 +247,25 @@ func testRefs(count int) []source.InstanceRef {
 		}
 	}
 	return refs
+}
+
+func timedFetchWindow(t *testing.T, src source.Source, options Options, refs []source.InstanceRef, center int) time.Duration {
+	t.Helper()
+
+	fetcher := New(src, options)
+
+	start := time.Now()
+	got, err := fetcher.FetchWindow(context.Background(), refs, center)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("FetchWindow returned error: %v", err)
+	}
+
+	if len(got) != len(refs) {
+		t.Fatalf("expected %d fetched instances, got %d", len(refs), len(got))
+	}
+
+	return elapsed
 }
 
 func assertSOPUIDs(t *testing.T, refs []source.InstanceRef, want []string) {
