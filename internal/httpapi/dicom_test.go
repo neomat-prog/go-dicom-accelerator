@@ -9,21 +9,22 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neomat-prog/go-dicom-gateway/source"
 	"github.com/suyashkumar/dicom"
 	dicomtag "github.com/suyashkumar/dicom/pkg/tag"
 	"github.com/suyashkumar/dicom/pkg/uid"
 )
 
 func TestDicomMetadataHandler_FileNotFound(t *testing.T) {
-	handler := dicomMetadataHandler("testdata/does-not-exist.dcm")
+	handler := dicomMetadataHandler(source.NewLocal("testdata/does-not-exist.dcm"))
 
 	req := httptest.NewRequest(http.MethodGet, "/dicom/metadata", nil)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected %d, got %d", http.StatusInternalServerError, w.Code)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected %d, got %d", http.StatusBadGateway, w.Code)
 	}
 
 	body := w.Body.String()
@@ -37,7 +38,7 @@ func TestDicomMetadataHandler_FileNotFound(t *testing.T) {
 }
 
 func TestDicomMetadataHandler_FileExists(t *testing.T) {
-	handler := dicomMetadataHandler(testDICOMFile(t))
+	handler := dicomMetadataHandler(source.NewLocal(testDICOMFile(t)))
 
 	req := httptest.NewRequest(http.MethodGet, "/dicom/metadata", nil)
 	w := httptest.NewRecorder()
@@ -52,7 +53,7 @@ func TestDicomMetadataHandler_FileExists(t *testing.T) {
 		t.Fatalf("expected Content-Type application/json, got %q", ct)
 	}
 
-	var got DICOMMetadata
+	var got source.Metadata
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("failed to decode json response: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestDicomMetadataHandler_FileExists(t *testing.T) {
 }
 
 func TestDicomHandler_FileOpens(t *testing.T) {
-	handler := dicomHandler(testDICOMFile(t))
+	handler := dicomHandler(source.NewLocal(testDICOMFile(t)))
 
 	req := httptest.NewRequest(http.MethodGet, "/dicom", nil)
 	w := httptest.NewRecorder()
@@ -129,14 +130,14 @@ func newDICOMElement(t *testing.T, elementTag dicomtag.Tag, value any) *dicom.El
 }
 
 func TestDicomHandler_FileNotFound(t *testing.T) {
-	handler := dicomHandler("testdata/does-not-exist.dcm")
+	handler := dicomHandler(source.NewLocal("testdata/does-not-exist.dcm"))
 
 	req := httptest.NewRequest(http.MethodGet, "/dicom", nil)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected %d, got %d", http.StatusNotFound, w.Code)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected %d, got %d", http.StatusBadGateway, w.Code)
 	}
 }
