@@ -24,6 +24,16 @@ type SeriesLister interface {
 	SeriesInstances(ctx context.Context, studyUID string, seriesUID string) ([]InstanceInfo, error)
 }
 
+type SeriesInfo struct {
+	StudyInstanceUID  string
+	SeriesInstanceUID string
+	Instances         []InstanceInfo
+}
+
+type StudyLister interface {
+	StudySeries(ctx context.Context, studyUID string) ([]SeriesInfo, error)
+}
+
 type Metadata struct {
 	StudyInstanceUID  string `json:"studyInstanceUID"`
 	SeriesInstanceUID string `json:"seriesInstanceUID"`

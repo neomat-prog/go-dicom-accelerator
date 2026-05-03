@@ -75,22 +75,7 @@ func (s *LocalDirectorySource) SeriesInstances(ctx context.Context, studyUID str
 		return nil, Wrap(ErrorKindNotFound, fmt.Errorf("series not found"))
 	}
 
-	sort.SliceStable(instances, func(i, j int) bool {
-		left := instances[i]
-		right := instances[j]
-
-		if left.HasInstanceNumber && right.HasInstanceNumber {
-			if left.InstanceNumber != right.InstanceNumber {
-				return left.InstanceNumber < right.InstanceNumber
-			}
-		}
-
-		if left.HasInstanceNumber != right.HasInstanceNumber {
-			return left.HasInstanceNumber
-		}
-
-		return left.Ref.SOPInstanceUID < right.Ref.SOPInstanceUID
-	})
+	sortInstanceInfos(instances)
 
 	return instances, nil
 }
@@ -145,7 +130,25 @@ func (s *LocalDirectorySource) Instance(ctx context.Context, ref InstanceRef) (R
 }
 
 func dicomFilePaths(root string) ([]string, error) {
-	entries, err := os.ReadDir(root)
+	var paths []string
+
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if entry.IsDir() {
+			return nil
+		}
+
+		if strings.ToLower(filepath.Ext(entry.Name())) != ".dcm" {
+			return nil
+		}
+
+		paths = append(paths, path)
+		return nil
+	})
+
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, Wrap(ErrorKindNotFound, err)
@@ -153,27 +156,92 @@ func dicomFilePaths(root string) ([]string, error) {
 		return nil, Wrap(ErrorKindUpstream, err)
 	}
 
-	var paths []string
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		if strings.ToLower(filepath.Ext(entry.Name())) != ".dcm" {
-			continue
-		}
-
-		paths = append(paths, filepath.Join(root, entry.Name()))
-	}
-
 	if len(paths) == 0 {
-		return nil, Wrap(ErrorKindNotFound, fmt.Errorf("no dicom files found in %s", root))
+		return nil, Wrap(ErrorKindNotFound, fmt.Errorf("no dicom files foind in %s", root))
 	}
 
 	sort.Strings(paths)
 
 	return paths, nil
+}
+
+func (s *LocalDirectorySource) StudySeries(ctx context.Context, studyUID string) ([]SeriesInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	paths, err := dicomFilePaths(s.Root)
+	if err != nil {
+		return nil, err
+	}
+
+	seriesByUID := make(map[string]*SeriesInfo)
+
+	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		info, err := readLocalInstanceInfo(path)
+		if err != nil {
+			return nil, Wrap(ErrorKindUpstream, err)
+		}
+
+		ref := info.Ref
+
+		if studyUID != "" && ref.StudyInstanceUID != studyUID {
+			continue
+		}
+
+		key := ref.StudyInstanceUID + "\x00" + ref.SeriesInstanceUID
+
+		series, ok := seriesByUID[key]
+		if !ok {
+			series = &SeriesInfo{
+				StudyInstanceUID:  ref.StudyInstanceUID,
+				SeriesInstanceUID: ref.SeriesInstanceUID,
+			}
+			seriesByUID[key] = series
+		}
+
+		series.Instances = append(series.Instances, info)
+	}
+
+	if len(seriesByUID) == 0 {
+		return nil, Wrap(ErrorKindNotFound, fmt.Errorf("study not found"))
+	}
+
+	seriesList := make([]SeriesInfo, 0, len(seriesByUID))
+
+	for _, series := range seriesByUID {
+		sortInstanceInfos(series.Instances)
+		seriesList = append(seriesList, *series)
+	}
+
+	sort.SliceStable(seriesList, func(i, j int) bool {
+		return seriesList[i].SeriesInstanceUID < seriesList[j].SeriesInstanceUID
+	})
+
+	return seriesList, nil
+}
+
+func sortInstanceInfos(instances []InstanceInfo) {
+	sort.SliceStable(instances, func(i, j int) bool {
+		left := instances[i]
+		right := instances[j]
+
+		if left.HasInstanceNumber && right.HasInstanceNumber {
+			if left.InstanceNumber != right.InstanceNumber {
+				return left.InstanceNumber < right.InstanceNumber
+			}
+		}
+
+		if left.HasInstanceNumber != right.HasInstanceNumber {
+			return left.HasInstanceNumber
+		}
+
+		return left.Ref.SOPInstanceUID < right.Ref.SOPInstanceUID
+	})
 }
 
 func readLocalInstanceInfo(path string) (InstanceInfo, error) {
