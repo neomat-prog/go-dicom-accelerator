@@ -23,7 +23,7 @@ const serverAddr = ":8081"
 func main() {
 	ctx := context.Background()
 
-	src := source.NewLocalDirectory("sample-dicom/S1241164704480_images/series1.2.840.113619.2.452.3.413971022.862.1730716718.853.3")
+	src := source.NewLocalDirectory("sample-dicom/S1241164704480_images")
 
 	if err := runAcceleratorSmokeTest(ctx, src); err != nil {
 		log.Fatal(err)
@@ -39,10 +39,19 @@ func main() {
 }
 
 func runAcceleratorSmokeTest(ctx context.Context, src *source.LocalDirectorySource) error {
-	instances, err := src.SeriesInstances(ctx, "", "")
+	seriesList, err := src.StudySeries(ctx, "")
 	if err != nil {
 		return err
 	}
+
+	largest := seriesList[0]
+	for _, series := range seriesList[1:] {
+		if len(series.Instances) > len(largest.Instances) {
+			largest = series
+		}
+	}
+
+	instances := largest.Instances
 
 	refs := make([]source.InstanceRef, len(instances))
 	for i, info := range instances {
@@ -68,7 +77,8 @@ func runAcceleratorSmokeTest(ctx context.Context, src *source.LocalDirectorySour
 		totalBytes += len(instance.Data)
 	}
 
-	log.Printf("Accelerator smoke test: series instances=%d", len(instances))
+	log.Printf("Study discovery: series count=%d", len(seriesList))
+	log.Printf("Study discovery: largest series=%s instances=%d", largest.SeriesInstanceUID, len(instances))
 	log.Printf("Accelerator smoke test: center index=%d sop=%s", center, refs[center].SOPInstanceUID)
 	log.Printf("Accelerator smoke test: fetched window=%d instances bytes=%d", len(window), totalBytes)
 
