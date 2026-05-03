@@ -25,20 +25,29 @@ func main() {
 
 	src := source.NewLocalDirectory("sample-dicom/S1241164704480_images")
 
-	if err := runAcceleratorSmokeTest(ctx, src); err != nil {
+	options := dicomfetch.DefaultOptions()
+	options.MaxConcurrency = 6
+	options.WindowBehind = 3
+	options.WindowAhead = 3
+	options.RequestTimeout = 30 * time.Second
+
+	fetcher := dicomfetch.New(src, options)
+
+	if err := runAcceleratorSmokeTest(ctx, src, fetcher); err != nil {
 		log.Fatal(err)
 	}
 
 	server := &http.Server{
 		Addr:    serverAddr,
-		Handler: httpapi.NewMux(src),
+		Handler: httpapi.NewAcceleratedMux(src, src, fetcher),
 	}
 
 	log.Println("Starting server on", serverAddr)
 	log.Fatal(server.ListenAndServe())
 }
 
-func runAcceleratorSmokeTest(ctx context.Context, src *source.LocalDirectorySource) error {
+func runAcceleratorSmokeTest(ctx context.Context, src *source.LocalDirectorySource, fetcher *dicomfetch.Fetcher) error {
+
 	seriesList, err := src.StudySeries(ctx, "")
 	if err != nil {
 		return err
@@ -58,13 +67,6 @@ func runAcceleratorSmokeTest(ctx context.Context, src *source.LocalDirectorySour
 		refs[i] = info.Ref
 	}
 
-	options := dicomfetch.DefaultOptions()
-	options.MaxConcurrency = 4
-	options.WindowBehind = 2
-	options.WindowAhead = 3
-	options.RequestTimeout = 30 * time.Second
-
-	fetcher := dicomfetch.New(src, options)
 	center := len(refs) / 2
 
 	window, err := fetcher.FetchWindow(ctx, refs, center)

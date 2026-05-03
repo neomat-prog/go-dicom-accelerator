@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 	"time"
 
@@ -143,6 +144,7 @@ func (f *Fetcher) FetchInstance(ctx context.Context, ref source.InstanceRef) (Fe
 	}
 
 	if got, ok := f.getCached(ref); ok {
+		log.Printf("dicomfetch: cache hit sop=%s bytes=%d", ref.SOPInstanceUID, len(got.Data))
 		return got, nil
 	}
 
@@ -153,6 +155,8 @@ func (f *Fetcher) FetchInstance(ctx context.Context, ref source.InstanceRef) (Fe
 		ctx, cancel = context.WithTimeout(ctx, options.RequestTimeout)
 		defer cancel()
 	}
+
+	log.Printf("dicomfetch: cache miss sop=%s", ref.SOPInstanceUID)
 
 	resp, err := f.Source.Instance(ctx, ref)
 	if err != nil {
@@ -174,6 +178,7 @@ func (f *Fetcher) FetchInstance(ctx context.Context, ref source.InstanceRef) (Fe
 	}
 
 	f.setCached(got)
+	log.Printf("dicomfetch: fetched sop=%s bytes=%d", got.Ref.SOPInstanceUID, len(got.Data))
 	return cloneFetchedInstance(got), nil
 }
 
@@ -190,6 +195,15 @@ func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, ce
 	if err != nil {
 		return nil, err
 	}
+
+	log.Printf(
+		"dicomfetch: fetch window center=%d window=%d behind=%d ahead=%d concurrency=%d",
+		center,
+		len(window),
+		options.WindowBehind,
+		options.WindowAhead,
+		options.MaxConcurrency,
+	)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -214,6 +228,8 @@ outer:
 			defer wg.Done()
 			defer func() { <-sem }()
 
+			log.Printf("dicomfetch: window fetch start index=%d sop=%s", i, ref.SOPInstanceUID)
+
 			instance, err := f.FetchInstance(ctx, ref)
 			if err != nil {
 				mu.Lock()
@@ -224,6 +240,7 @@ outer:
 				return
 			}
 
+			log.Printf("dicomfetch: window fetch done index=%d sop=%s bytes=%d", i, instance.Ref.SOPInstanceUID, len(instance.Data))
 			instances[i] = instance
 		}(i, ref)
 	}
