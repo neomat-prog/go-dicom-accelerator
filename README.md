@@ -102,15 +102,16 @@ Implemented today:
 - `GET /dicom/metadata`
 - local-file-backed DICOM serving
 - metadata parsing for Study Instance UID, Series Instance UID, and SOP Instance UID
-- minimal `dicomfetch` package with `Options` and `Fetcher` placeholders
+- recursive local study discovery with study, series, and instance listings
+- sliding-window instance acceleration with bounded concurrency and in-memory caching
+- explicit full-series batch prefetch jobs for OHIF-style workflows
 
 ## Not Implemented Yet
 
 | Feature                                   | Description |
 |------------------------------------------|-------------|
 | Public importable retrieval package      | A reusable Go package for external use |
-| Sliding-window fetcher                  | Bounded concurrent prefetch around the requested instance |
-| Production study or series downloads     | Disk-backed or stream-oriented fetching of multiple DICOM instances |
+| Production cache                         | Size-limited memory cache, disk cache, or stream-oriented cache |
 | GCP Healthcare API adapter              | Integration with GCP DICOM Store |
 | GCS adapter                             | Support for Google Cloud Storage sources |
 | DICOMweb route compatibility            | Standard DICOMweb API support |
@@ -224,7 +225,7 @@ go run ./cmd/server
 The server listens on:
 
 ```text
-http://localhost:8080
+http://localhost:8081
 ```
 
 ## Current API
@@ -235,14 +236,22 @@ The current gateway exposes:
 GET /healthz
 GET /dicom
 GET /dicom/metadata
+GET /studies
+GET /studies/{studyUID}/series
+GET /studies/{studyUID}/series/{seriesUID}/instances
+GET /studies/{studyUID}/series/{seriesUID}/instances/{instanceUID}
+POST /studies/{studyUID}/prefetch
+GET /prefetch/{jobID}
 ```
 
 Example requests:
 
 ```bash
-curl http://localhost:8080/healthz
-curl http://localhost:8080/dicom/metadata
-curl -OJ http://localhost:8080/dicom
+curl http://localhost:8081/healthz
+curl http://localhost:8081/dicom/metadata
+curl http://localhost:8081/studies
+curl http://localhost:8081/studies/{studyUID}/series
+curl -OJ http://localhost:8081/studies/{studyUID}/series/{seriesUID}/instances/{sopInstanceUID}
 ```
 
 Example health response:
@@ -261,17 +270,71 @@ Example metadata response:
 }
 ```
 
+## Full-Series Batch Prefetch
+
+The normal instance route still returns one requested DICOM instance. The
+prefetch route starts a background job that warms complete series into the same
+long-lived in-memory `dicomfetch.Fetcher` cache used by that instance route.
+
+If `seriesInstanceUIDs` is omitted or empty, the gateway prefetches every series
+in the study. `seriesBatchSize` defaults to `6` when it is missing or invalid.
+
+Start a full-study prefetch:
+
+```bash
+curl -s -X POST http://localhost:8081/studies/{studyUID}/prefetch \
+  -H 'Content-Type: application/json' \
+  -d '{"seriesBatchSize":6}'
+```
+
+Start a selected-series prefetch:
+
+```bash
+curl -s -X POST http://localhost:8081/studies/{studyUID}/prefetch \
+  -H 'Content-Type: application/json' \
+  -d '{"seriesInstanceUIDs":["{seriesUID}"],"seriesBatchSize":6}'
+```
+
+Response:
+
+```json
+{
+  "jobId": "prefetch-1",
+  "status": "running",
+  "statusUrl": "/prefetch/prefetch-1"
+}
+```
+
+Check progress:
+
+```bash
+curl -s http://localhost:8081/prefetch/prefetch-1
+```
+
+Example status:
+
+```json
+{
+  "jobId": "prefetch-1",
+  "studyInstanceUID": "1.2.840....",
+  "status": "running",
+  "seriesTotal": 16,
+  "seriesCompleted": 6,
+  "instancesTotal": 670,
+  "instancesCompleted": 240,
+  "bytesLoaded": 12345678,
+  "currentBatch": 2,
+  "errors": []
+}
+```
+
 ## Planned Gateway Routes
 
-These routes are not implemented yet, but they match the intended OHIF-facing
-gateway direction:
+These routes are still future work for DICOMweb compatibility and richer OHIF
+integration:
 
 ```text
-GET /studies
 GET /studies/{studyUID}
-GET /studies/{studyUID}/series
-GET /studies/{studyUID}/series/{seriesUID}/instances
-GET /studies/{studyUID}/series/{seriesUID}/instances/{instanceUID}
 ```
 
 ## Roadmap

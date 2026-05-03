@@ -32,6 +32,7 @@ func main() {
 	options.RequestTimeout = 30 * time.Second
 
 	fetcher := dicomfetch.New(src, options)
+	prefetcher := httpapi.NewPrefetchManager(src, fetcher)
 
 	if err := runAcceleratorSmokeTest(ctx, src, fetcher); err != nil {
 		log.Fatal(err)
@@ -39,7 +40,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    serverAddr,
-		Handler: httpapi.NewAcceleratedMux(src, src, fetcher),
+		Handler: httpapi.NewAcceleratedMux(src, src, fetcher, prefetcher),
 	}
 
 	log.Println("Starting server on", serverAddr)

@@ -183,7 +183,6 @@ func (f *Fetcher) FetchInstance(ctx context.Context, ref source.InstanceRef) (Fe
 }
 
 func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, center int) ([]FetchedInstance, error) {
-
 	if f == nil {
 		return nil, errors.New("dicomfetch: nil fetcher")
 	}
@@ -205,17 +204,51 @@ func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, ce
 		options.MaxConcurrency,
 	)
 
+	return f.fetchRefs(ctx, window, "window")
+}
+
+func (f *Fetcher) FetchSeries(ctx context.Context, refs []source.InstanceRef) ([]FetchedInstance, error) {
+	if f == nil {
+		return nil, errors.New("dicomfetch: nil fetcher")
+	}
+
+	if len(refs) == 0 {
+		return []FetchedInstance{}, nil
+	}
+
+	options := f.Options.Normalize()
+	log.Printf(
+		"dicomfetch: fetch series series=%s instances=%d concurrency=%d",
+		refs[0].SeriesInstanceUID,
+		len(refs),
+		options.MaxConcurrency,
+	)
+
+	return f.fetchRefs(ctx, refs, "series")
+}
+
+func (f *Fetcher) fetchRefs(ctx context.Context, refs []source.InstanceRef, label string) ([]FetchedInstance, error) {
+	if f == nil {
+		return nil, errors.New("dicomfetch: nil fetcher")
+	}
+
+	if len(refs) == 0 {
+		return []FetchedInstance{}, nil
+	}
+
+	options := f.Options.Normalize()
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	instances := make([]FetchedInstance, len(window))
+	instances := make([]FetchedInstance, len(refs))
 	sem := make(chan struct{}, options.MaxConcurrency)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var errs []error
 outer:
-	for i, ref := range window {
+	for i, ref := range refs {
 		select {
 		case <-ctx.Done():
 			break outer
@@ -228,7 +261,7 @@ outer:
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			log.Printf("dicomfetch: window fetch start index=%d sop=%s", i, ref.SOPInstanceUID)
+			log.Printf("dicomfetch: %s fetch start index=%d sop=%s", label, i, ref.SOPInstanceUID)
 
 			instance, err := f.FetchInstance(ctx, ref)
 			if err != nil {
@@ -240,7 +273,7 @@ outer:
 				return
 			}
 
-			log.Printf("dicomfetch: window fetch done index=%d sop=%s bytes=%d", i, instance.Ref.SOPInstanceUID, len(instance.Data))
+			log.Printf("dicomfetch: %s fetch done index=%d sop=%s bytes=%d", label, i, instance.Ref.SOPInstanceUID, len(instance.Data))
 			instances[i] = instance
 		}(i, ref)
 	}
@@ -256,7 +289,6 @@ outer:
 	}
 
 	return instances, nil
-
 }
 
 func ReadAllAndClose(resp source.Response) ([]byte, error) {
