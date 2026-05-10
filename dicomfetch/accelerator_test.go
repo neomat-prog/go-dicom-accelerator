@@ -151,6 +151,39 @@ func TestFetchWindow_ConcurrentIsFasterThanSequentialWhenSourceHasLatency(t *tes
 	}
 }
 
+func TestFetchSeries_FetchesAllInstancesAndUsesCache(t *testing.T) {
+	src := &trackingSource{delay: 10 * time.Millisecond}
+	fetcher := New(src, Options{
+		MaxConcurrency: 2,
+		RequestTimeout: time.Second,
+	})
+	refs := testRefs(6)
+
+	got, err := fetcher.FetchSeries(context.Background(), refs)
+	if err != nil {
+		t.Fatalf("FetchSeries returned error: %v", err)
+	}
+
+	if len(got) != len(refs) {
+		t.Fatalf("expected %d fetched instances, got %d", len(refs), len(got))
+	}
+	if src.maxActiveRequests() > 2 {
+		t.Fatalf("expected at most 2 active requests, saw %d", src.maxActiveRequests())
+	}
+	if src.callCount() != len(refs) {
+		t.Fatalf("expected %d source calls, got %d", len(refs), src.callCount())
+	}
+
+	_, err = fetcher.FetchSeries(context.Background(), refs)
+	if err != nil {
+		t.Fatalf("FetchSeries from cache returned error: %v", err)
+	}
+
+	if src.callCount() != len(refs) {
+		t.Fatalf("expected cached second series fetch to avoid extra calls, got %d", src.callCount())
+	}
+}
+
 type trackingSource struct {
 	mu        sync.Mutex
 	active    int
