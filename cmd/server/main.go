@@ -9,47 +9,67 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/neomat-prog/go-dicom-gateway/dicomfetch"
+	"github.com/neomat-prog/go-dicom-gateway/internal/config"
 	"github.com/neomat-prog/go-dicom-gateway/internal/httpapi"
 	"github.com/neomat-prog/go-dicom-gateway/source"
 )
 
-const serverAddr = ":8081"
-
 func main() {
 	ctx := context.Background()
 
-	src := source.NewLocalDirectory("sample-dicom/S1241164704480_images")
-
-	options := dicomfetch.DefaultOptions()
-	options.MaxConcurrency = 6
-	options.WindowBehind = 3
-	options.WindowAhead = 3
-	options.RequestTimeout = 30 * time.Second
-
-	fetcher := dicomfetch.New(src, options)
-	prefetcher := httpapi.NewPrefetchManager(src, fetcher)
-
-	if err := runAcceleratorSmokeTest(ctx, src, fetcher); err != nil {
+	cfg, err := config.Load(".env")
+	if err != nil {
 		log.Fatal(err)
 	}
 
-	server := &http.Server{
-		Addr:    serverAddr,
-		Handler: httpapi.NewAcceleratedMux(src, src, fetcher, prefetcher),
+	src, lister, err := buildSource(cfg)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	log.Println("Starting server on", serverAddr)
+	fetcher := dicomfetch.New(src, dicomfetch.Options{
+		MaxConcurrency: cfg.MaxConcurrency,
+		WindowBehind:   cfg.WindowBehind,
+		WindowAhead:    cfg.WindowAhead,
+		RequestTimeout: cfg.RequestTimeout,
+	})
+
+	if cfg.RunSmokeTest {
+		if err := runAcceleratorSmokeTest(ctx, lister, fetcher); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	prefetcher := httpapi.NewPrefetchManager(lister, fetcher)
+
+	server := &http.Server{
+		Addr:    cfg.ServerAddr,
+		Handler: httpapi.NewAcceleratedMux(src, lister, fetcher, prefetcher),
+	}
+
+	log.Println("Starting server on", cfg.ServerAddr)
 	log.Fatal(server.ListenAndServe())
+
 }
 
-func runAcceleratorSmokeTest(ctx context.Context, src *source.LocalDirectorySource, fetcher *dicomfetch.Fetcher) error {
+func buildSource(cfg config.Config) (source.Source, source.StudyLister, error) {
+	switch cfg.SourceType {
+	case "local-directory":
+		src := source.NewLocalDirectory(cfg.LocalDICOMRoot)
+		return src, src, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported source type %q", cfg.SourceType)
+	}
+}
 
-	seriesList, err := src.StudySeries(ctx, "")
+func runAcceleratorSmokeTest(ctx context.Context, lister source.StudyLister, fetcher *dicomfetch.Fetcher) error {
+
+	seriesList, err := lister.StudySeries(ctx, "")
 	if err != nil {
 		return err
 	}
