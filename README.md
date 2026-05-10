@@ -106,18 +106,6 @@ Implemented today:
 - sliding-window instance acceleration with bounded concurrency and in-memory caching
 - explicit full-series batch prefetch jobs for OHIF-style workflows
 
-## Not Implemented Yet
-
-| Feature                                   | Description |
-|------------------------------------------|-------------|
-| Public importable retrieval package      | A reusable Go package for external use |
-| Production cache                         | Size-limited memory cache, disk cache, or stream-oriented cache |
-| GCP Healthcare API adapter              | Integration with GCP DICOM Store |
-| GCS adapter                             | Support for Google Cloud Storage sources |
-| DICOMweb route compatibility            | Standard DICOMweb API support |
-| Benchmark suite                         | Performance comparisons (sequential vs concurrent) |
-| Production OHIF integration             | Full integration with OHIF viewer workflows |
-
 ## Target Architecture
 
 The planned library boundary should look roughly like this:
@@ -336,61 +324,6 @@ integration:
 ```text
 GET /studies/{studyUID}
 ```
-
-## Roadmap
-
-Near-term work:
-
-- extract retrieval concepts out of `internal/httpapi`
-- create a `dicomfetch.SelectWindow` helper
-- create a `dicomfetch.FetchInstance` method
-- create a `dicomfetch.FetchWindow` method first sequentially, then with bounded concurrency
-- add a production-ready cache behind the fetcher
-- add local-source tests that do not depend on cloud credentials
-- define the GCP Healthcare API adapter boundary
-- add retries, cancellation, and timeout behavior
-- document expected OHIF request and response contracts
-
-## Learning Path For Building This Project
-
-If you are newer to Go, build this in small layers:
-
-1. Understand `source.Source`.
-   This is an interface. Any adapter only needs to satisfy the methods in
-   `source/source.go`.
-
-2. Create a `dicomfetch.SelectWindow` helper.
-   This should be pure slice math. Given an ordered series and a current index,
-   it returns the nearby instances that should be warmed.
-
-3. Create `dicomfetch.FetchWindow` sequentially.
-   Before adding goroutines, make it fetch the selected window one instance at a
-   time. Simple first, fast second.
-
-4. Add bounded concurrency.
-   This is the first concurrency lesson. Use goroutines plus a buffered channel
-   as a semaphore so only `MaxConcurrency` backend fetches run at once.
-
-5. Add caching.
-   Real DICOM studies can be large, so start with a tiny memory cache for
-   learning, then evolve it toward a size-limited memory cache, disk cache, or
-   streaming cache.
-
-6. Add a real adapter.
-   Start with local files, then implement GCP Healthcare API or GCS behind the
-   same `source.Source` interface.
-
-7. Make the gateway OHIF-compatible.
-   The HTTP layer should translate OHIF/DICOMweb requests into `InstanceRef`
-   values and ordered series lists, then let `dicomfetch` do the acceleration.
-
-Later work:
-
-- implement GCP Healthcare API / DICOM Store fetching
-- implement Cloud Storage fetching
-- add benchmark results for sequential vs concurrent retrieval
-- add structured logging and basic metrics hooks
-- add DICOMweb-compatible route helpers where useful
 
 ## Contributing
 
