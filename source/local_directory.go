@@ -232,11 +232,15 @@ func (s *LocalDirectorySource) StudySeries(ctx context.Context, studyUID string)
 		seriesList = append(seriesList, *series)
 	}
 
+	sortSeriesList(seriesList)
+
+	return seriesList, nil
+}
+
+func sortSeriesList(seriesList []SeriesInfo) {
 	sort.SliceStable(seriesList, func(i, j int) bool {
 		return seriesList[i].SeriesInstanceUID < seriesList[j].SeriesInstanceUID
 	})
-
-	return seriesList, nil
 }
 
 func sortInstanceInfos(instances []InstanceInfo) {

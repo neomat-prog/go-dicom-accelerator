@@ -51,6 +51,10 @@ type Source interface {
 	Instance(ctx context.Context, ref InstanceRef) (Response, error)
 }
 
+type Prober interface {
+	Probe(ctx context.Context) error
+}
+
 type ErrorKind string
 
 const (
@@ -95,8 +99,4 @@ func IsKind(err error, kind ErrorKind) bool {
 		return false
 	}
 	return target.Kind == kind
-}
-
-type Prober interface {
-	Probe(ctx context.Context) error
 }
