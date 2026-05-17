@@ -3,23 +3,48 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/neomat-prog/go-dicom-gateway/dicomfetch"
+	"github.com/neomat-prog/go-dicom-gateway/source"
 )
 
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+func healthHandler(sourceType string, prober source.Prober, fetcher *dicomfetch.Fetcher) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
-	response := map[string]string{
-		"status": "ok",
-	}
+		type sourceStatus struct {
+			Type   string `json:"type"`
+			Status string `json:"status"`
+			Error  string `json:"error,omitempty"`
+		}
 
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
+		type response struct {
+			Status string       `json:"status"`
+			Source sourceStatus `json:"source"`
+			Cache  struct {
+				Size int `json:"size"`
+			} `json:"cache"`
+		}
 
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		return
+		src := sourceStatus{Type: sourceType, Status: "ok"}
+		if err := prober.Probe(r.Context()); err != nil {
+			src.Status = "error"
+			src.Error = err.Error()
+		}
+
+		status, code := "ok", http.StatusOK
+		if src.Status != "ok" {
+			status, code = "degraded", http.StatusServiceUnavailable
+		}
+
+		resp := response{Status: status, Source: src}
+		resp.Cache.Size = fetcher.CacheSize()
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(resp)
 	}
 }

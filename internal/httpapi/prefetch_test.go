@@ -88,7 +88,7 @@ func TestPrefetchRoutes_StartAndStatus(t *testing.T) {
 	src := newPrefetchTestSource("study-01", 2, 2)
 	fetcher := dicomfetch.New(src, dicomfetch.Options{MaxConcurrency: 2})
 	manager := NewPrefetchManager(src, fetcher)
-	mux := NewAcceleratedMux(src, src, fetcher, manager)
+	mux := NewAcceleratedMux(src, "test", mockProber{}, src, fetcher, manager)
 
 	body := bytes.NewBufferString(`{"seriesBatchSize":6}`)
 	req := httptest.NewRequest(http.MethodPost, "/studies/study-01/prefetch", body)
@@ -135,7 +135,7 @@ func TestPrefetchRoutes_InvalidStudyAndUnknownJob(t *testing.T) {
 	src := newPrefetchTestSource("study-01", 1, 1)
 	fetcher := dicomfetch.New(src, dicomfetch.Options{MaxConcurrency: 2})
 	manager := NewPrefetchManager(src, fetcher)
-	mux := NewAcceleratedMux(src, src, fetcher, manager)
+	mux := NewAcceleratedMux(src, "test", mockProber{}, src, fetcher, manager)
 
 	req := httptest.NewRequest(http.MethodPost, "/studies/missing-study/prefetch", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()

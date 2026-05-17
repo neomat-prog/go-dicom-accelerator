@@ -63,6 +63,15 @@ func (o Options) Normalize() Options {
 	return o
 }
 
+func (f *Fetcher) CacheSize() int {
+	if f == nil {
+		return 0
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.cache)
+}
+
 func New(src source.Source, options Options) *Fetcher {
 	return &Fetcher{
 		Source:  src,

@@ -6,8 +6,6 @@ import (
 	"io"
 )
 
-// TODO(neomat-prog) maybe change this to InstanceUID?
-
 type InstanceRef struct {
 	StudyInstanceUID  string
 	SeriesInstanceUID string
@@ -97,4 +95,8 @@ func IsKind(err error, kind ErrorKind) bool {
 		return false
 	}
 	return target.Kind == kind
+}
+
+type Prober interface {
+	Probe(ctx context.Context) error
 }
