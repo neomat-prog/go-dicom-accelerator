@@ -27,7 +27,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	src, lister, err := buildSource(cfg)
+	src, lister, prober, err := buildSource(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:    cfg.ServerAddr,
-		Handler: httpapi.NewAcceleratedMux(src, lister, fetcher, prefetcher),
+		Handler: httpapi.NewAcceleratedMux(src, cfg.SourceType, prober, lister, fetcher, prefetcher),
 	}
 
 	log.Println("Starting server on", cfg.ServerAddr)
@@ -57,13 +57,13 @@ func main() {
 
 }
 
-func buildSource(cfg config.Config) (source.Source, source.StudyLister, error) {
+func buildSource(cfg config.Config) (source.Source, source.StudyLister, source.Prober, error) {
 	switch cfg.SourceType {
 	case "local-directory":
 		src := source.NewLocalDirectory(cfg.LocalDICOMRoot)
-		return src, src, nil
+		return src, src, src, nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported source type %q", cfg.SourceType)
+		return nil, nil, nil, fmt.Errorf("unsupported source type %q", cfg.SourceType)
 	}
 }
 

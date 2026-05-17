@@ -21,6 +21,20 @@ func NewLocalDirectory(root string) *LocalDirectorySource {
 	return &LocalDirectorySource{Root: root}
 }
 
+func (s *LocalDirectorySource) Probe(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := os.Stat(s.Root)
+	if err != nil {
+		return Wrap(ErrorKindUpstream, err)
+	}
+	if !info.IsDir() {
+		return Wrap(ErrorKindUpstream, fmt.Errorf("%s is not a directory", s.Root))
+	}
+	return nil
+}
+
 func (s *LocalDirectorySource) StudyMetadata(ctx context.Context, studyUID string) (Metadata, error) {
 	instances, err := s.SeriesInstances(ctx, studyUID, "")
 	if err != nil {
