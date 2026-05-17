@@ -13,11 +13,7 @@ import (
 	"github.com/neomat-prog/go-dicom-gateway/source"
 )
 
-// TODO(neomat-prog) 12.04.26: Create a proper endpoint for fetching and serving DICOM files.
-// add more endpoints for listing available DICOM files for now and fetching via STUDY UID, SERIES UID, and INSTANCE UID.
-// FUTURE: implement a more robust solution to obtain files from DICOM Store GCP
-
-//TODO(neomat-prog) 12.04.26 : detect and expose study/series/instance UIDs from DICOM metadata
+// TODO(neomat-prog): implement a more robust solution to obtain files from DICOM Store GCP
 
 /*
 
