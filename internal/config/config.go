@@ -17,6 +17,8 @@ const (
 	serverAddrKey         = "SERVER_ADDR"
 	sourceTypeKey         = "SOURCE_TYPE"
 	localDICOMRootKey     = "LOCAL_DICOM_ROOT"
+	gcsBucketKey          = "GCS_BUCKET"
+	gcsPrefixKey          = "GCS_PREFIX"
 	maxConcurrencyKey     = "FETCH_MAX_CONCURRENCY"
 	windowBehindKey       = "FETCH_WINDOW_BEHIND"
 	windowAheadKey        = "FETCH_WINDOW_AHEAD"
@@ -29,6 +31,7 @@ const (
 	defaultWindowAhead    = 3
 	defaultRequestTimeout = 30 * time.Second
 	sourceTypeLocalDir    = "local-directory"
+	sourceTypeGCS         = "gcs"
 )
 
 var ErrMissingLocalDICOMRoot = errors.New("LOCAL_DICOM_ROOT is required for local-directory source")
@@ -37,6 +40,8 @@ type Config struct {
 	ServerAddr     string
 	SourceType     string
 	LocalDICOMRoot string
+	GCSBucket      string
+	GCSPrefix      string
 
 	MaxConcurrency int
 	WindowBehind   int
@@ -60,6 +65,8 @@ func Load(envPath string) (Config, error) {
 	sourceType := configString(fileValues, sourceTypeKey, defaultSourceType)
 
 	localRoot, localRootFromDotEnv := configPath(fileValues, localDICOMRootKey)
+	gcsBucket := configString(fileValues, gcsBucketKey, "")
+	gcsPrefix := configString(fileValues, gcsPrefixKey, "")
 
 	maxConcurrency, err := configInt(fileValues, maxConcurrencyKey, defaultMaxConcurrency)
 	if err != nil {
@@ -90,6 +97,8 @@ func Load(envPath string) (Config, error) {
 		ServerAddr:     serverAddr,
 		SourceType:     sourceType,
 		LocalDICOMRoot: normalizePath(localRoot, envDir, localRootFromDotEnv),
+		GCSBucket:      gcsBucket,
+		GCSPrefix:      gcsPrefix,
 		MaxConcurrency: maxConcurrency,
 		WindowBehind:   windowBehind,
 		WindowAhead:    windowAhead,
@@ -122,6 +131,10 @@ func (c Config) Validate() error {
 
 		if !info.IsDir() {
 			return fmt.Errorf("%s must point to a directory", localDICOMRootKey)
+		}
+	case sourceTypeGCS:
+		if strings.TrimSpace(c.GCSBucket) == "" {
+			return fmt.Errorf("GCS_BUCKET is required for gcs source")
 		}
 	default:
 		return fmt.Errorf("unsupported %s %q", sourceTypeKey, c.SourceType)
