@@ -2,6 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.26.2-00ADD8?logo=go&logoColor=white)](./go.mod)
 [![GCP](https://img.shields.io/badge/GCP-Storage-1d4ed8)](#sources)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 <img align="right" width="200" src="./assets/gopher.png" alt="DICOM Retrieval Accelerator project visual">
 
