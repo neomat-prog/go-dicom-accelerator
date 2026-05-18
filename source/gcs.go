@@ -27,8 +27,8 @@ func NewGCSSource(ctx context.Context, bucketName, prefix string) (*GCSSource, e
 }
 
 func (s *GCSSource) Probe(ctx context.Context) error {
-	_, err := s.bucket.Attrs(ctx)
-	if err != nil {
+	it := s.bucket.Objects(ctx, &storage.Query{Prefix: s.prefix})
+	if _, err := it.Next(); err != nil && err != iterator.Done {
 		return Wrap(ErrorKindUpstream, fmt.Errorf("gcs bucket not accessible: %w", err))
 	}
 	return nil

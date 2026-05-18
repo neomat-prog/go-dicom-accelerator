@@ -36,7 +36,9 @@ func (s *LocalDirectorySource) Probe(ctx context.Context) error {
 }
 
 func sortSeriesList(seriesList []SeriesInfo) {
-	sortSeriesList(seriesList)
+	sort.SliceStable(seriesList, func(i, j int) bool {
+		return seriesList[i].SeriesInstanceUID < seriesList[j].SeriesInstanceUID
+	})
 }
 
 func (s *LocalDirectorySource) StudyMetadata(ctx context.Context, studyUID string) (Metadata, error) {
