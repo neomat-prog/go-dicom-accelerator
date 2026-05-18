@@ -186,6 +186,8 @@ func clearConfigEnv(t *testing.T) {
 		serverAddrKey,
 		sourceTypeKey,
 		localDICOMRootKey,
+		gcsBucketKey,
+		gcsPrefixKey,
 		maxConcurrencyKey,
 		windowBehindKey,
 		windowAheadKey,
@@ -193,6 +195,39 @@ func clearConfigEnv(t *testing.T) {
 		runSmokeTestKey,
 	} {
 		t.Setenv(key, "")
+	}
+}
+
+func TestLoad_GCSSourceRequiresBucket(t *testing.T) {
+	clearConfigEnv(t)
+
+	envPath := filepath.Join(t.TempDir(), ".env")
+	writeFile(t, envPath, "SOURCE_TYPE=gcs\n")
+
+	_, err := Load(envPath)
+	if err == nil {
+		t.Fatal("expected error when GCS_BUCKET is missing, got nil")
+	}
+	if !strings.Contains(err.Error(), "GCS_BUCKET") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLoad_GCSSourceReadsConfig(t *testing.T) {
+	clearConfigEnv(t)
+
+	envPath := filepath.Join(t.TempDir(), ".env")
+	writeFile(t, envPath, "SOURCE_TYPE=gcs\nGCS_BUCKET=my-bucket\nGCS_PREFIX=studies/\n")
+
+	cfg, err := Load(envPath)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.GCSBucket != "my-bucket" {
+		t.Fatalf("want GCSBucket %q, got %q", "my-bucket", cfg.GCSBucket)
+	}
+	if cfg.GCSPrefix != "studies/" {
+		t.Fatalf("want GCSPrefix %q, got %q", "studies/", cfg.GCSPrefix)
 	}
 }
 

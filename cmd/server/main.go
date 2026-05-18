@@ -62,6 +62,13 @@ func buildSource(cfg config.Config) (source.Source, source.StudyLister, source.P
 	case "local-directory":
 		src := source.NewLocalDirectory(cfg.LocalDICOMRoot)
 		return src, src, src, nil
+	case "gcs":
+		ctx := context.Background()
+		src, err := source.NewGCSSource(ctx, cfg.GCSBucket, cfg.GCSPrefix)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return src, src, src, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("unsupported source type %q", cfg.SourceType)
 	}

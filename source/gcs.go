@@ -156,3 +156,45 @@ func (s *GCSSource) StudySeries(ctx context.Context, studyUID string) ([]SeriesI
 	sortSeriesList(seriesList)
 	return seriesList, nil
 }
+
+func (s *GCSSource) StudyMetadata(ctx context.Context, studyUID string) (Metadata, error) {
+	instances, err := s.SeriesInstances(ctx, studyUID, "")
+	if err != nil {
+		return Metadata{}, err
+	}
+	ref := instances[0].Ref
+	return Metadata{
+		StudyInstanceUID:  ref.StudyInstanceUID,
+		SeriesInstanceUID: ref.SeriesInstanceUID,
+		SOPInstanceUID:    ref.SOPInstanceUID,
+	}, nil
+}
+
+func (s *GCSSource) Instance(ctx context.Context, ref InstanceRef) (Response, error) {
+	if err := ctx.Err(); err != nil {
+		return Response{}, err
+	}
+
+	name := s.objectName(ref)
+	obj := s.bucket.Object(name)
+
+	attrs, err := obj.Attrs(ctx)
+	if err == storage.ErrObjectNotExist {
+		return Response{}, Wrap(ErrorKindNotFound, fmt.Errorf("instance not found %s", name))
+	}
+	if err != nil {
+		return Response{}, Wrap(ErrorKindUpstream, fmt.Errorf("gcs attr %s, %w", name, err))
+	}
+
+	reader, err := obj.NewReader(ctx)
+	if err != nil {
+		return Response{}, Wrap(ErrorKindUpstream, fmt.Errorf("gcs open %s, %w", name, err))
+	}
+
+	return Response{
+		Body:          reader,
+		ContentType:   "application/dicom",
+		ContentLength: attrs.Size,
+		Filename:      ref.SOPInstanceUID + ".dcm",
+	}, nil
+}
