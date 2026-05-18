@@ -19,7 +19,7 @@ DICOM Retrieval Accelerator
 
 ## How It Works
 
-DICOM viewers typically request instances one at a time as users scroll through a series. Each request waits for the backend — slow when that backend is cloud storage.
+DICOM viewers typically request instances one at a time as users scroll through a series. Each request waits for the backend slow when that backend is cloud storage.
 
 This library intercepts that pattern:
 
