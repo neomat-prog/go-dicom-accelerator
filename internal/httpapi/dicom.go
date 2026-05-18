@@ -1,7 +1,3 @@
-// This file defines a HTTP handler for serving DICOM files.
-// Requests to the /dicom endpoint will return the DICOM file with the appropriate content
-// type and disposition headers. The file is read from the path specified in the configuration.
-
 package httpapi
 
 import (
@@ -13,8 +9,6 @@ import (
 	"github.com/neomat-prog/go-dicom-gateway/source"
 )
 
-// TODO(neomat-prog): implement a more robust solution to obtain files from DICOM Store GCP
-
 /*
 
 GET /studies
@@ -22,10 +16,6 @@ GET /studies/{studyUID}
 GET /studies/{studyUID}/series
 GET /studies/{studyUID}/series/{seriesUID}/instances
 GET /studies/{studyUID}/series/{seriesUID}/instances/{instanceUID}
-
-FUTURE: implement a retrieval layer
-a metadata/index layer
-handlers that call those layers
 
 */
 

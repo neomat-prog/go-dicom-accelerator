@@ -35,7 +35,7 @@ func (s *LocalDirectorySource) Probe(ctx context.Context) error {
 	return nil
 }
 
-func sortSeriesList(seriesList []SeriesInfo) {
+func SortSeriesList(seriesList []SeriesInfo) {
 	sort.SliceStable(seriesList, func(i, j int) bool {
 		return seriesList[i].SeriesInstanceUID < seriesList[j].SeriesInstanceUID
 	})
@@ -95,7 +95,7 @@ func (s *LocalDirectorySource) SeriesInstances(ctx context.Context, studyUID str
 		return nil, Wrap(ErrorKindNotFound, fmt.Errorf("series not found"))
 	}
 
-	sortInstanceInfos(instances)
+	SortInstanceInfos(instances)
 
 	return instances, nil
 }
@@ -234,16 +234,16 @@ func (s *LocalDirectorySource) StudySeries(ctx context.Context, studyUID string)
 	seriesList := make([]SeriesInfo, 0, len(seriesByUID))
 
 	for _, series := range seriesByUID {
-		sortInstanceInfos(series.Instances)
+		SortInstanceInfos(series.Instances)
 		seriesList = append(seriesList, *series)
 	}
 
-	sortSeriesList(seriesList)
+	SortSeriesList(seriesList)
 
 	return seriesList, nil
 }
 
-func sortInstanceInfos(instances []InstanceInfo) {
+func SortInstanceInfos(instances []InstanceInfo) {
 	sort.SliceStable(instances, func(i, j int) bool {
 		left := instances[i]
 		right := instances[j]
