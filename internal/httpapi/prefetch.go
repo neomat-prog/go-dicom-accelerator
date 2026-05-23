@@ -43,6 +43,8 @@ type PrefetchJob struct {
 	BytesLoaded        int64    `json:"bytesLoaded"`
 	CurrentBatch       int      `json:"currentBatch"`
 	Errors             []string `json:"errors"`
+
+	cancel context.CancelFunc `json:"-"`
 }
 
 type PrefetchRequest struct {
@@ -84,6 +86,8 @@ func (m *PrefetchManager) Start(ctx context.Context, studyUID string, req Prefet
 		batchSize = defaultSeriesBatchSize
 	}
 
+	jobCtx, cancel := context.WithCancel(context.Background())
+
 	job := PrefetchJob{
 		JobID:            m.nextJobID(),
 		StudyInstanceUID: studyUID,
@@ -93,11 +97,13 @@ func (m *PrefetchManager) Start(ctx context.Context, studyUID string, req Prefet
 		CurrentBatch:     1,
 	}
 
+	job.cancel = cancel
+
 	m.mut.Lock()
 	m.jobs[job.JobID] = &job
 	m.mut.Unlock()
 
-	go m.run(job.JobID, selected, batchSize)
+	go m.run(jobCtx, job.JobID, selected, batchSize)
 
 	return clonePrefetchJob(job), nil
 }
@@ -114,7 +120,7 @@ func (m *PrefetchManager) Status(jobID string) (PrefetchJob, error) {
 	return clonePrefetchJob(*job), nil
 }
 
-func (m *PrefetchManager) run(jobID string, seriesList []source.SeriesInfo, batchSize int) {
+func (m *PrefetchManager) run(ctx context.Context, jobID string, seriesList []source.SeriesInfo, batchSize int) {
 	for start := 0; start < len(seriesList); start += batchSize {
 		end := start + batchSize
 		if end > len(seriesList) {
@@ -133,7 +139,7 @@ func (m *PrefetchManager) run(jobID string, seriesList []source.SeriesInfo, batc
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				m.prefetchSeries(jobID, series)
+				m.prefetchSeries(ctx, jobID, series)
 			}()
 		}
 		wg.Wait()
@@ -151,11 +157,18 @@ func (m *PrefetchManager) callBatchStart(batch int, series []source.SeriesInfo) 
 	m.onBatchStart(batch, batchSeries)
 }
 
-func (m *PrefetchManager) prefetchSeries(jobID string, series source.SeriesInfo) {
+func (m *PrefetchManager) prefetchSeries(ctx context.Context, jobID string, series source.SeriesInfo) {
 	var bytesLoaded int64
 	var completed int
 	for _, instance := range series.Instances {
-		fi, err := m.fetcher.FetchInstance(context.Background(), instance.Ref)
+		select {
+		case <-ctx.Done():
+			m.addError(jobID, ctx.Err().Error())
+			return
+		default:
+		}
+
+		fi, err := m.fetcher.FetchInstance(ctx, instance.Ref)
 		if err != nil {
 			m.addError(jobID, fmt.Sprintf("series %s instance %s: %v", series.SeriesInstanceUID, instance.Ref.SOPInstanceUID, err))
 			continue
@@ -211,6 +224,10 @@ func (m *PrefetchManager) finish(jobID string) {
 	job := m.jobs[jobID]
 	if job == nil {
 		return
+	}
+
+	if job.cancel != nil {
+		job.cancel()
 	}
 
 	if len(job.Errors) > 0 {
