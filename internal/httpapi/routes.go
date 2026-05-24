@@ -8,9 +8,6 @@ import (
 )
 
 // NewMux registers the HTTP routes exposed by the application.
-
-// TODO(neomat-prog): instead of a file path use source.Source
-// it should be source/adapter specific and not file path specific
 func NewMux(src source.Source, sourceType string, prober source.Prober, fetcher *dicomfetch.Fetcher) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthHandler(sourceType, prober, fetcher))
