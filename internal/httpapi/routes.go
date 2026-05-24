@@ -28,6 +28,7 @@ func NewAcceleratedMux(src source.Source, sourceType string, prober source.Probe
 	mux.HandleFunc("GET /studies/{studyUID}/series/{seriesUID}/instances/{instanceUID}", acceleratedInstanceHandler(lister, fetcher))
 	mux.HandleFunc("POST /studies/{studyUID}/prefetch", prefetchHandler(prefetcher))
 	mux.HandleFunc("GET /prefetch/{jobID}", prefetchStatusHandler(prefetcher))
+	mux.HandleFunc("DELETE /prefetch/{jobID}", prefetchDeleteHandler(prefetcher))
 
 	return mux
 }

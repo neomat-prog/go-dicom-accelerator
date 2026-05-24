@@ -317,3 +317,27 @@ func clonePrefetchJob(job PrefetchJob) PrefetchJob {
 	job.Errors = append([]string(nil), job.Errors...)
 	return job
 }
+
+func (m *PrefetchManager) Delete(jobID string) error {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+	job := m.jobs[jobID]
+	if job == nil {
+		return source.Wrap(source.ErrorKindNotFound, fmt.Errorf("prefetch job %q not found", jobID))
+	}
+	if job.cancel != nil {
+		job.cancel()
+	}
+	delete(m.jobs, jobID)
+	return nil
+}
+
+func prefetchDeleteHandler(manager *PrefetchManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := manager.Delete(r.PathValue("jobID")); err != nil {
+			writeSourceError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
