@@ -158,24 +158,13 @@ func (m *PrefetchManager) callBatchStart(batch int, series []source.SeriesInfo) 
 }
 
 func (m *PrefetchManager) prefetchSeries(ctx context.Context, jobID string, series source.SeriesInfo) {
-	var bytesLoaded int64
-	var completed int
-	for _, instance := range series.Instances {
-		select {
-		case <-ctx.Done():
-			m.addError(jobID, ctx.Err().Error())
-			return
-		default:
-		}
-
-		fi, err := m.fetcher.FetchInstance(ctx, instance.Ref)
-		if err != nil {
-			m.addError(jobID, fmt.Sprintf("series %s instance %s: %v", series.SeriesInstanceUID, instance.Ref.SOPInstanceUID, err))
-			continue
-		}
-		bytesLoaded += int64(len(fi.Data))
-		fi.Data = nil
-		completed++
+	refs := make([]source.InstanceRef, len(series.Instances))
+	for i, inst := range series.Instances {
+		refs[i] = inst.Ref
+	}
+	bytesLoaded, completed, err := m.fetcher.WarmSeries(ctx, refs)
+	if err != nil {
+		m.addError(jobID, fmt.Sprintf("series %s: %v", series.SeriesInstanceUID, err))
 	}
 	m.addSeriesProgress(jobID, completed, bytesLoaded)
 }
