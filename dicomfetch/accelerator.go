@@ -24,14 +24,16 @@ type Options struct {
 	WindowAhead    int
 	WindowBehind   int
 	RequestTimeout time.Duration
+	MaxCacheBytes  int64
 }
 
 type Fetcher struct {
 	Source  source.Source
 	Options Options
 
-	mu    sync.Mutex
-	cache map[string]FetchedInstance
+	mut        sync.Mutex
+	cache      map[string]FetchedInstance
+	cacheBytes int64
 }
 
 func DefaultOptions() Options {
@@ -60,6 +62,9 @@ func (o Options) Normalize() Options {
 	if o.RequestTimeout < 0 {
 		o.RequestTimeout = 0
 	}
+	if o.MaxCacheBytes < 0 {
+		o.MaxCacheBytes = 0
+	}
 	return o
 }
 
@@ -67,8 +72,8 @@ func (f *Fetcher) CacheSize() int {
 	if f == nil {
 		return 0
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.mut.Lock()
+	defer f.mut.Unlock()
 	return len(f.cache)
 }
 
@@ -254,7 +259,7 @@ func (f *Fetcher) fetchRefs(ctx context.Context, refs []source.InstanceRef, labe
 	sem := make(chan struct{}, options.MaxConcurrency)
 
 	var wg sync.WaitGroup
-	var mu sync.Mutex
+	var mut sync.Mutex
 	var errs []error
 outer:
 	for i, ref := range refs {
@@ -274,9 +279,9 @@ outer:
 
 			instance, err := f.FetchInstance(ctx, ref)
 			if err != nil {
-				mu.Lock()
+				mut.Lock()
 				errs = append(errs, fmt.Errorf("fetch instance %q: %w", ref.SOPInstanceUID, err))
-				mu.Unlock()
+				mut.Unlock()
 
 				cancel()
 				return
@@ -310,8 +315,8 @@ func ReadAllAndClose(resp source.Response) ([]byte, error) {
 }
 
 func (f *Fetcher) getCached(ref source.InstanceRef) (FetchedInstance, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.mut.Lock()
+	defer f.mut.Unlock()
 
 	got, ok := f.cache[cacheKey(ref)]
 	if !ok {
@@ -321,14 +326,38 @@ func (f *Fetcher) getCached(ref source.InstanceRef) (FetchedInstance, bool) {
 }
 
 func (f *Fetcher) setCached(instance FetchedInstance) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.mut.Lock()
+	defer f.mut.Unlock()
 
 	if f.cache == nil {
 		f.cache = make(map[string]FetchedInstance)
 	}
+	key := cacheKey(instance.Ref)
+	if existing, ok := f.cache[key]; ok {
+		f.cacheBytes -= int64(len(existing.Data))
+	}
+	cloned := cloneFetchedInstance(instance)
+	newBytes := int64(len(cloned.Data))
+	if f.Options.MaxCacheBytes > 0 {
+		for f.cacheBytes+newBytes > f.Options.MaxCacheBytes && len(f.cache) > 0 {
+			for k, v := range f.cache {
+				f.cacheBytes -= int64(len(v.Data))
+				delete(f.cache, k)
+				break
+			}
+		}
+	}
+	f.cache[key] = cloned
+	f.cacheBytes += newBytes
+}
 
-	f.cache[cacheKey(instance.Ref)] = cloneFetchedInstance(instance)
+func (f *Fetcher) CacheBytes() int64 {
+	if f == nil {
+		return 0
+	}
+	f.mut.Lock()
+	defer f.mut.Unlock()
+	return f.cacheBytes
 }
 
 func cloneFetchedInstance(instance FetchedInstance) FetchedInstance {
@@ -338,4 +367,48 @@ func cloneFetchedInstance(instance FetchedInstance) FetchedInstance {
 
 func cacheKey(ref source.InstanceRef) string {
 	return ref.StudyInstanceUID + "\x00" + ref.SeriesInstanceUID + "\x00" + ref.SOPInstanceUID
+}
+
+func (f *Fetcher) WarmSeries(ctx context.Context, refs []source.InstanceRef) (int64, int, error) {
+	if f == nil {
+		return 0, 0, errors.New("dicomfetch: nil fetcher")
+	}
+	if len(refs) == 0 {
+		return 0, 0, nil
+	}
+
+	options := f.Options.Normalize()
+	sem := make(chan struct{}, options.MaxConcurrency)
+
+	var wg sync.WaitGroup
+	var mut sync.Mutex
+	var errs []error
+	var bytesLoaded int64
+	var completed int
+
+outer:
+	for _, ref := range refs {
+		select {
+		case <-ctx.Done():
+			break outer
+		case sem <- struct{}{}:
+		}
+		wg.Add(1)
+		go func(ref source.InstanceRef) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			fi, err := f.FetchInstance(ctx, ref)
+			mut.Lock()
+			defer mut.Unlock()
+			if err != nil {
+				errs = append(errs, fmt.Errorf("warm instance %q: %w", ref.SOPInstanceUID, err))
+				return
+			}
+			bytesLoaded += int64(len(fi.Data))
+			fi.Data = nil // cache already holds its clone
+			completed++
+		}(ref)
+	}
+	wg.Wait()
+	return bytesLoaded, completed, errors.Join(errs...)
 }
