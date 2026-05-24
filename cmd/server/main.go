@@ -13,7 +13,11 @@ import (
 	gcssource "github.com/neomat-prog/go-dicom-gateway/source/gcs"
 )
 
+var version = "dev"
+
 func main() {
+	log.Printf("go-dicom-gateway version=%s", version)
+
 	ctx := context.Background()
 
 	cfg, err := config.Load(".env")
