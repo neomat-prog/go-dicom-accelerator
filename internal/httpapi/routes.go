@@ -10,9 +10,9 @@ import (
 // NewMux registers the HTTP routes exposed by the application.
 func NewMux(src source.Source, sourceType string, prober source.Prober, fetcher *dicomfetch.Fetcher) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", healthHandler(sourceType, prober, fetcher))
-	mux.HandleFunc("/dicom", dicomHandler(src))
-	mux.HandleFunc("/dicom/metadata", dicomMetadataHandler(src))
+	mux.HandleFunc("GET /healthz", healthHandler(sourceType, prober, fetcher))
+	mux.HandleFunc("GET /dicom", dicomHandler(src))
+	mux.HandleFunc("GET /dicom/metadata", dicomMetadataHandler(src))
 	return mux
 }
 

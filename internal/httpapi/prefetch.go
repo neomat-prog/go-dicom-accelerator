@@ -25,9 +25,10 @@ type PrefetchManager struct {
 	lister  source.StudyLister
 	fetcher *dicomfetch.Fetcher
 
-	mut    sync.RWMutex
-	nextID int
-	jobs   map[string]*PrefetchJob
+	mut     sync.RWMutex
+	nextID  int
+	jobs    map[string]*PrefetchJob
+	cancels map[string]context.CancelFunc
 
 	onBatchStart func(batch int, series []source.SeriesInfo)
 }
@@ -43,8 +44,6 @@ type PrefetchJob struct {
 	BytesLoaded        int64    `json:"bytesLoaded"`
 	CurrentBatch       int      `json:"currentBatch"`
 	Errors             []string `json:"errors"`
-
-	cancel context.CancelFunc `json:"-"`
 }
 
 type PrefetchRequest struct {
@@ -63,6 +62,7 @@ func NewPrefetchManager(lister source.StudyLister, fetcher *dicomfetch.Fetcher) 
 		lister:  lister,
 		fetcher: fetcher,
 		jobs:    make(map[string]*PrefetchJob),
+		cancels: make(map[string]context.CancelFunc),
 	}
 }
 
@@ -97,10 +97,9 @@ func (m *PrefetchManager) Start(ctx context.Context, studyUID string, req Prefet
 		CurrentBatch:     1,
 	}
 
-	job.cancel = cancel
-
 	m.mut.Lock()
 	m.jobs[job.JobID] = &job
+	m.cancels[job.JobID] = cancel
 	m.mut.Unlock()
 
 	go m.run(jobCtx, job.JobID, selected, batchSize)
@@ -121,11 +120,12 @@ func (m *PrefetchManager) Status(jobID string) (PrefetchJob, error) {
 }
 
 func (m *PrefetchManager) run(ctx context.Context, jobID string, seriesList []source.SeriesInfo, batchSize int) {
+	if batchSize <= 0 {
+		batchSize = len(seriesList)
+	}
+
 	for start := 0; start < len(seriesList); start += batchSize {
-		end := start + batchSize
-		if end > len(seriesList) {
-			end = len(seriesList)
-		}
+		end := min(start+batchSize, len(seriesList))
 
 		batchNumber := start/batchSize + 1
 		batchSeries := seriesList[start:end]
@@ -136,11 +136,9 @@ func (m *PrefetchManager) run(ctx context.Context, jobID string, seriesList []so
 		var wg sync.WaitGroup
 		for _, series := range batchSeries {
 			series := series
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				m.prefetchSeries(ctx, jobID, series)
-			}()
+			})
 		}
 		wg.Wait()
 	}
@@ -215,8 +213,9 @@ func (m *PrefetchManager) finish(jobID string) {
 		return
 	}
 
-	if job.cancel != nil {
-		job.cancel()
+	if cancel := m.cancels[jobID]; cancel != nil {
+		cancel()
+		delete(m.cancels, jobID)
 	}
 
 	if len(job.Errors) > 0 {
@@ -325,10 +324,11 @@ func (m *PrefetchManager) Delete(jobID string) error {
 	if job == nil {
 		return source.Wrap(source.ErrorKindNotFound, fmt.Errorf("prefetch job %q not found", jobID))
 	}
-	if job.cancel != nil {
-		job.cancel()
+	if cancel := m.cancels[jobID]; cancel != nil {
+		cancel()
 	}
 	delete(m.jobs, jobID)
+	delete(m.cancels, jobID)
 	return nil
 }
 

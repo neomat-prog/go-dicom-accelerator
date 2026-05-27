@@ -9,16 +9,6 @@ import (
 	"github.com/neomat-prog/go-dicom-gateway/source"
 )
 
-/*
-
-GET /studies
-GET /studies/{studyUID}
-GET /studies/{studyUID}/series
-GET /studies/{studyUID}/series/{seriesUID}/instances
-GET /studies/{studyUID}/series/{seriesUID}/instances/{instanceUID}
-
-*/
-
 func dicomMetadataHandler(src source.Source) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		metadata, err := src.StudyMetadata(r.Context(), "")
@@ -28,7 +18,6 @@ func dicomMetadataHandler(src source.Source) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
 
 		if err := json.NewEncoder(w).Encode(metadata); err != nil {
 			http.Error(w, "failed to encode metadata", http.StatusInternalServerError)
@@ -52,8 +41,6 @@ func dicomHandler(src source.Source) http.HandlerFunc {
 		if resp.ContentLength >= 0 {
 			w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
 		}
-
-		w.WriteHeader(http.StatusOK)
 
 		if _, err := io.Copy(w, resp.Body); err != nil {
 			return

@@ -86,11 +86,10 @@ func New(src source.Source, options Options) *Fetcher {
 }
 
 type FetchedInstance struct {
-	Ref           source.InstanceRef
-	ContentType   string
-	ContentLength int64
-	Filename      string
-	Data          []byte
+	Ref         source.InstanceRef
+	ContentType string
+	Filename    string
+	Data        []byte
 }
 
 func (i FetchedInstance) Response() source.Response {
@@ -162,11 +161,9 @@ func (f *Fetcher) FetchInstance(ctx context.Context, ref source.InstanceRef) (Fe
 		return got, nil
 	}
 
-	options := f.Options.Normalize()
-
-	if options.RequestTimeout > 0 {
+	if f.Options.RequestTimeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, options.RequestTimeout)
+		ctx, cancel = context.WithTimeout(ctx, f.Options.RequestTimeout)
 		defer cancel()
 	}
 
@@ -184,11 +181,10 @@ func (f *Fetcher) FetchInstance(ctx context.Context, ref source.InstanceRef) (Fe
 	}
 
 	got := FetchedInstance{
-		Ref:           ref,
-		ContentType:   resp.ContentType,
-		ContentLength: int64(len(data)),
-		Filename:      resp.Filename,
-		Data:          data,
+		Ref:         ref,
+		ContentType: resp.ContentType,
+		Filename:    resp.Filename,
+		Data:        data,
 	}
 
 	f.setCached(got)
@@ -201,9 +197,7 @@ func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, ce
 		return nil, errors.New("dicomfetch: nil fetcher")
 	}
 
-	options := f.Options.Normalize()
-
-	window, err := SelectWindow(refs, center, options.WindowBehind, options.WindowAhead)
+	window, err := SelectWindow(refs, center, f.Options.WindowBehind, f.Options.WindowAhead)
 
 	if err != nil {
 		return nil, err
@@ -213,9 +207,9 @@ func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, ce
 		"dicomfetch: fetch window center=%d window=%d behind=%d ahead=%d concurrency=%d",
 		center,
 		len(window),
-		options.WindowBehind,
-		options.WindowAhead,
-		options.MaxConcurrency,
+		f.Options.WindowBehind,
+		f.Options.WindowAhead,
+		f.Options.MaxConcurrency,
 	)
 
 	return f.fetchRefs(ctx, window, "window")
@@ -230,12 +224,11 @@ func (f *Fetcher) FetchSeries(ctx context.Context, refs []source.InstanceRef) ([
 		return []FetchedInstance{}, nil
 	}
 
-	options := f.Options.Normalize()
 	log.Printf(
 		"dicomfetch: fetch series series=%s instances=%d concurrency=%d",
 		refs[0].SeriesInstanceUID,
 		len(refs),
-		options.MaxConcurrency,
+		f.Options.MaxConcurrency,
 	)
 
 	return f.fetchRefs(ctx, refs, "series")
@@ -250,13 +243,11 @@ func (f *Fetcher) fetchRefs(ctx context.Context, refs []source.InstanceRef, labe
 		return []FetchedInstance{}, nil
 	}
 
-	options := f.Options.Normalize()
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	instances := make([]FetchedInstance, len(refs))
-	sem := make(chan struct{}, options.MaxConcurrency)
+	sem := make(chan struct{}, f.Options.MaxConcurrency)
 
 	var wg sync.WaitGroup
 	var mut sync.Mutex
@@ -377,8 +368,7 @@ func (f *Fetcher) WarmSeries(ctx context.Context, refs []source.InstanceRef) (in
 		return 0, 0, nil
 	}
 
-	options := f.Options.Normalize()
-	sem := make(chan struct{}, options.MaxConcurrency)
+	sem := make(chan struct{}, f.Options.MaxConcurrency)
 
 	var wg sync.WaitGroup
 	var mut sync.Mutex
