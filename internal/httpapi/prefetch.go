@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	PrefetchStatusRunning   = "running"
+	PrefetchStatusRunning = "running"
+
 	PrefetchStatusCompleted = "completed"
-	PrefetchStatusFailed    = "failed"
+
+	PrefetchStatusFailed = "failed"
 
 	defaultSeriesBatchSize = 6
 )
@@ -66,6 +68,7 @@ func NewPrefetchManager(lister source.StudyLister, fetcher *dicomfetch.Fetcher) 
 	}
 }
 
+// Start creates a prefetch job for a study and starts it in the background.
 func (m *PrefetchManager) Start(ctx context.Context, studyUID string, req PrefetchRequest) (PrefetchJob, error) {
 	if m == nil || m.lister == nil || m.fetcher == nil {
 		return PrefetchJob{}, errors.New("prefetch manager is not configured")
@@ -107,6 +110,7 @@ func (m *PrefetchManager) Start(ctx context.Context, studyUID string, req Prefet
 	return clonePrefetchJob(job), nil
 }
 
+// Status returns a snapshot of one prefetch job.
 func (m *PrefetchManager) Status(jobID string) (PrefetchJob, error) {
 	m.mut.RLock()
 	defer m.mut.RUnlock()
@@ -117,6 +121,77 @@ func (m *PrefetchManager) Status(jobID string) (PrefetchJob, error) {
 	}
 
 	return clonePrefetchJob(*job), nil
+}
+
+// Delete cancels and removes one tracked prefetch job.
+func (m *PrefetchManager) Delete(jobID string) error {
+	m.mut.Lock()
+	defer m.mut.Unlock()
+	job := m.jobs[jobID]
+	if job == nil {
+		return source.Wrap(source.ErrorKindNotFound, fmt.Errorf("prefetch job %q not found", jobID))
+	}
+	if cancel := m.cancels[jobID]; cancel != nil {
+		cancel()
+	}
+	delete(m.jobs, jobID)
+	delete(m.cancels, jobID)
+	return nil
+}
+
+// prefetchHandler starts a background prefetch job for a study.
+func prefetchHandler(manager *PrefetchManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		studyUID := r.PathValue("studyUID")
+
+		req, err := readPrefetchRequest(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		job, err := manager.Start(r.Context(), studyUID, req)
+		if err != nil {
+			writeSourceError(w, err)
+			return
+		}
+
+		resp := PrefetchStartResponse{
+			JobID:     job.JobID,
+			Status:    job.Status,
+			StatusURL: "/prefetch/" + job.JobID,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+// prefetchStatusHandler returns the latest status for a prefetch job.
+func prefetchStatusHandler(manager *PrefetchManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		job, err := manager.Status(r.PathValue("jobID"))
+		if err != nil {
+			writeSourceError(w, err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(job)
+	}
+}
+
+// prefetchDeleteHandler cancels and removes a prefetch job.
+func prefetchDeleteHandler(manager *PrefetchManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := manager.Delete(r.PathValue("jobID")); err != nil {
+			writeSourceError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func (m *PrefetchManager) run(ctx context.Context, jobID string, seriesList []source.SeriesInfo, batchSize int) {
@@ -225,48 +300,6 @@ func (m *PrefetchManager) finish(jobID string) {
 	job.Status = PrefetchStatusCompleted
 }
 
-func prefetchHandler(manager *PrefetchManager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		studyUID := r.PathValue("studyUID")
-
-		req, err := readPrefetchRequest(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		job, err := manager.Start(r.Context(), studyUID, req)
-		if err != nil {
-			writeSourceError(w, err)
-			return
-		}
-
-		resp := PrefetchStartResponse{
-			JobID:     job.JobID,
-			Status:    job.Status,
-			StatusURL: "/prefetch/" + job.JobID,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(resp)
-	}
-}
-
-func prefetchStatusHandler(manager *PrefetchManager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		job, err := manager.Status(r.PathValue("jobID"))
-		if err != nil {
-			writeSourceError(w, err)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(job)
-	}
-}
-
 func readPrefetchRequest(body io.Reader) (PrefetchRequest, error) {
 	var req PrefetchRequest
 	if body == nil {
@@ -315,29 +348,4 @@ func countInstances(seriesList []source.SeriesInfo) int {
 func clonePrefetchJob(job PrefetchJob) PrefetchJob {
 	job.Errors = append([]string(nil), job.Errors...)
 	return job
-}
-
-func (m *PrefetchManager) Delete(jobID string) error {
-	m.mut.Lock()
-	defer m.mut.Unlock()
-	job := m.jobs[jobID]
-	if job == nil {
-		return source.Wrap(source.ErrorKindNotFound, fmt.Errorf("prefetch job %q not found", jobID))
-	}
-	if cancel := m.cancels[jobID]; cancel != nil {
-		cancel()
-	}
-	delete(m.jobs, jobID)
-	delete(m.cancels, jobID)
-	return nil
-}
-
-func prefetchDeleteHandler(manager *PrefetchManager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := manager.Delete(r.PathValue("jobID")); err != nil {
-			writeSourceError(w, err)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}
 }

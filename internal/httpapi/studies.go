@@ -11,6 +11,8 @@ import (
 	"github.com/neomat-prog/go-dicom-gateway/source"
 )
 
+// acceleratedInstanceHandler serves the requested instance and warms nearby
+// instances through the fetcher window.
 func acceleratedInstanceHandler(lister source.StudyLister, fetcher *dicomfetch.Fetcher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		studyUID := r.PathValue("studyUID")
@@ -68,6 +70,7 @@ func acceleratedInstanceHandler(lister source.StudyLister, fetcher *dicomfetch.F
 	}
 }
 
+// studiesHandler summarizes discovered studies.
 func studiesHandler(lister source.StudyLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		seriesList, err := lister.StudySeries(r.Context(), "")
@@ -105,6 +108,7 @@ func studiesHandler(lister source.StudyLister) http.HandlerFunc {
 	}
 }
 
+// studySeriesHandler lists series for one study.
 func studySeriesHandler(lister source.StudyLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		studyUID := r.PathValue("studyUID")
@@ -136,6 +140,7 @@ func studySeriesHandler(lister source.StudyLister) http.HandlerFunc {
 	}
 }
 
+// seriesInstancesHandler lists instances for one study series.
 func seriesInstancesHandler(lister source.StudyLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		studyUID := r.PathValue("studyUID")
