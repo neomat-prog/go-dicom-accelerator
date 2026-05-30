@@ -18,48 +18,7 @@ func NewLocal(dicomFilePath string) *LocalSource {
 	return &LocalSource{DICOMFilePath: dicomFilePath}
 }
 
-func readLocalMetadata(dicomFilePath string) (Metadata, error) {
-	ds, err := dicom.ParseFile(dicomFilePath, nil, dicom.SkipPixelData())
-	if err != nil {
-		return Metadata{}, fmt.Errorf("parse dicom: %w", err)
-	}
-
-	studyUID, err := readStringTag(ds, dicomtag.StudyInstanceUID)
-	if err != nil {
-		return Metadata{}, err
-	}
-
-	seriesUID, err := readStringTag(ds, dicomtag.SeriesInstanceUID)
-	if err != nil {
-		return Metadata{}, err
-	}
-
-	instanceUID, err := readStringTag(ds, dicomtag.SOPInstanceUID)
-	if err != nil {
-		return Metadata{}, err
-	}
-
-	return Metadata{
-		StudyInstanceUID:  studyUID,
-		SeriesInstanceUID: seriesUID,
-		SOPInstanceUID:    instanceUID,
-	}, nil
-}
-
-func readStringTag(ds dicom.Dataset, t dicomtag.Tag) (string, error) {
-	elem, err := ds.FindElementByTag(t)
-	if err != nil {
-		return "", fmt.Errorf("missing tag %v: %w", t, err)
-	}
-
-	values := dicom.MustGetStrings(elem.Value)
-	if len(values) == 0 {
-		return "", fmt.Errorf("tag %v has no value", t)
-	}
-
-	return values[0], nil
-}
-
+// StudyMetadata reads the DICOM identifiers from the configured file.
 func (s *LocalSource) StudyMetadata(ctx context.Context, studyUID string) (Metadata, error) {
 	if err := ctx.Err(); err != nil {
 		return Metadata{}, err
@@ -76,6 +35,7 @@ func (s *LocalSource) StudyMetadata(ctx context.Context, studyUID string) (Metad
 	return metadata, nil
 }
 
+// Instance opens the configured DICOM file when ref matches its identifiers.
 func (s *LocalSource) Instance(ctx context.Context, ref InstanceRef) (Response, error) {
 	if err := ctx.Err(); err != nil {
 		return Response{}, err
@@ -116,4 +76,46 @@ func (s *LocalSource) Instance(ctx context.Context, ref InstanceRef) (Response, 
 		ContentLength: info.Size(),
 		Filename:      filepath.Base(s.DICOMFilePath),
 	}, nil
+}
+
+func readLocalMetadata(dicomFilePath string) (Metadata, error) {
+	ds, err := dicom.ParseFile(dicomFilePath, nil, dicom.SkipPixelData())
+	if err != nil {
+		return Metadata{}, fmt.Errorf("parse dicom: %w", err)
+	}
+
+	studyUID, err := readStringTag(ds, dicomtag.StudyInstanceUID)
+	if err != nil {
+		return Metadata{}, err
+	}
+
+	seriesUID, err := readStringTag(ds, dicomtag.SeriesInstanceUID)
+	if err != nil {
+		return Metadata{}, err
+	}
+
+	instanceUID, err := readStringTag(ds, dicomtag.SOPInstanceUID)
+	if err != nil {
+		return Metadata{}, err
+	}
+
+	return Metadata{
+		StudyInstanceUID:  studyUID,
+		SeriesInstanceUID: seriesUID,
+		SOPInstanceUID:    instanceUID,
+	}, nil
+}
+
+func readStringTag(ds dicom.Dataset, t dicomtag.Tag) (string, error) {
+	elem, err := ds.FindElementByTag(t)
+	if err != nil {
+		return "", fmt.Errorf("missing tag %v: %w", t, err)
+	}
+
+	values := dicom.MustGetStrings(elem.Value)
+	if len(values) == 0 {
+		return "", fmt.Errorf("tag %v has no value", t)
+	}
+
+	return values[0], nil
 }

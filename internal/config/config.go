@@ -34,6 +34,8 @@ const (
 	sourceTypeGCS         = "gcs"
 )
 
+// ErrMissingLocalDICOMRoot is returned when a local-directory source has no
+// configured root directory.
 var ErrMissingLocalDICOMRoot = errors.New("LOCAL_DICOM_ROOT is required for local-directory source")
 
 type Config struct {
@@ -113,6 +115,7 @@ func Load(envPath string) (Config, error) {
 	return cfg, nil
 }
 
+// Validate checks that the configured source and fetch options are usable.
 func (c Config) Validate() error {
 	if strings.TrimSpace(c.ServerAddr) == "" {
 		return fmt.Errorf("%s is required", serverAddrKey)

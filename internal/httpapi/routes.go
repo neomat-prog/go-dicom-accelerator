@@ -7,15 +7,17 @@ import (
 	"github.com/neomat-prog/go-dicom-gateway/source"
 )
 
-// NewMux registers the HTTP routes exposed by the application.
+// NewMux registers the base HTTP routes exposed by the application.
 func NewMux(src source.Source, sourceType string, prober source.Prober, fetcher *dicomfetch.Fetcher) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", healthHandler(sourceType, prober, fetcher))
-	mux.HandleFunc("/dicom", dicomHandler(src))
-	mux.HandleFunc("/dicom/metadata", dicomMetadataHandler(src))
+	mux.HandleFunc("GET /healthz", healthHandler(sourceType, prober, fetcher))
+	mux.HandleFunc("GET /dicom", dicomHandler(src))
+	mux.HandleFunc("GET /dicom/metadata", dicomMetadataHandler(src))
 	return mux
 }
 
+// NewAcceleratedMux registers study browsing, accelerated instance retrieval,
+// and prefetch routes in addition to the base routes.
 func NewAcceleratedMux(src source.Source, sourceType string, prober source.Prober, lister source.StudyLister, fetcher *dicomfetch.Fetcher, prefetcher *PrefetchManager) *http.ServeMux {
 	mux := NewMux(src, sourceType, prober, fetcher)
 

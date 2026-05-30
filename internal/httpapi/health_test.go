@@ -56,7 +56,7 @@ func TestHealth_MethodNotAllowed(t *testing.T) {
 		t.Fatalf("expected %d, got %d", http.StatusMethodNotAllowed, w.Code)
 	}
 
-	if !strings.Contains(w.Body.String(), "method not allowed") {
+	if !strings.Contains(w.Body.String(), "Method Not Allowed") {
 		t.Fatalf("expected method not allowed message, got %q", w.Body.String())
 	}
 }
