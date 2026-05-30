@@ -38,7 +38,7 @@ type Metadata struct {
 	SOPInstanceUID    string `json:"sopInstanceUID"`
 }
 
-// convention to use ContentLength = -1 when length is unknown
+// Use ContentLength = -1 when the length is unknown.
 type Response struct {
 	Body          io.ReadCloser
 	ContentType   string
@@ -51,6 +51,7 @@ type Source interface {
 	Instance(ctx context.Context, ref InstanceRef) (Response, error)
 }
 
+// Prober checks whether a backing DICOM source is reachable.
 type Prober interface {
 	Probe(ctx context.Context) error
 }
@@ -58,10 +59,13 @@ type Prober interface {
 type ErrorKind string
 
 const (
-	ErrorKindBadRequest    ErrorKind = "bad_request"
-	ErrorKindNotFound      ErrorKind = "not_found"
+	ErrorKindBadRequest ErrorKind = "bad_request"
+
+	ErrorKindNotFound ErrorKind = "not_found"
+
 	ErrorKindNotAcceptable ErrorKind = "not_acceptable"
-	ErrorKindUpstream      ErrorKind = "upstream"
+
+	ErrorKindUpstream ErrorKind = "upstream"
 )
 
 type Error struct {

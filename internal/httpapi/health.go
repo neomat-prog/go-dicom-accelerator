@@ -10,11 +10,6 @@ import (
 
 func healthHandler(sourceType string, prober source.Prober, fetcher *dicomfetch.Fetcher) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
 		type sourceStatus struct {
 			Type   string `json:"type"`
 			Status string `json:"status"`

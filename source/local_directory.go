@@ -21,6 +21,7 @@ func NewLocalDirectory(root string) *LocalDirectorySource {
 	return &LocalDirectorySource{Root: root}
 }
 
+// Probe verifies that the configured root exists and is a directory.
 func (s *LocalDirectorySource) Probe(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -35,12 +36,7 @@ func (s *LocalDirectorySource) Probe(ctx context.Context) error {
 	return nil
 }
 
-func SortSeriesList(seriesList []SeriesInfo) {
-	sort.SliceStable(seriesList, func(i, j int) bool {
-		return seriesList[i].SeriesInstanceUID < seriesList[j].SeriesInstanceUID
-	})
-}
-
+// StudyMetadata returns identifiers from the first matching local instance.
 func (s *LocalDirectorySource) StudyMetadata(ctx context.Context, studyUID string) (Metadata, error) {
 	instances, err := s.SeriesInstances(ctx, studyUID, "")
 	if err != nil {
@@ -56,6 +52,7 @@ func (s *LocalDirectorySource) StudyMetadata(ctx context.Context, studyUID strin
 	}, nil
 }
 
+// SeriesInstances lists instances matching studyUID and seriesUID.
 func (s *LocalDirectorySource) SeriesInstances(ctx context.Context, studyUID string, seriesUID string) ([]InstanceInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -100,6 +97,7 @@ func (s *LocalDirectorySource) SeriesInstances(ctx context.Context, studyUID str
 	return instances, nil
 }
 
+// Instance opens the local DICOM file matching ref.
 func (s *LocalDirectorySource) Instance(ctx context.Context, ref InstanceRef) (Response, error) {
 	if err := ctx.Err(); err != nil {
 		return Response{}, err
@@ -149,42 +147,7 @@ func (s *LocalDirectorySource) Instance(ctx context.Context, ref InstanceRef) (R
 	return Response{}, Wrap(ErrorKindNotFound, fmt.Errorf("instance not found"))
 }
 
-func dicomFilePaths(root string) ([]string, error) {
-	var paths []string
-
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if entry.IsDir() {
-			return nil
-		}
-
-		if strings.ToLower(filepath.Ext(entry.Name())) != ".dcm" {
-			return nil
-		}
-
-		paths = append(paths, path)
-		return nil
-	})
-
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, Wrap(ErrorKindNotFound, err)
-		}
-		return nil, Wrap(ErrorKindUpstream, err)
-	}
-
-	if len(paths) == 0 {
-		return nil, Wrap(ErrorKindNotFound, fmt.Errorf("no dicom files foind in %s", root))
-	}
-
-	sort.Strings(paths)
-
-	return paths, nil
-}
-
+// StudySeries groups local instances by study and series identifiers.
 func (s *LocalDirectorySource) StudySeries(ctx context.Context, studyUID string) ([]SeriesInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -243,6 +206,15 @@ func (s *LocalDirectorySource) StudySeries(ctx context.Context, studyUID string)
 	return seriesList, nil
 }
 
+// SortSeriesList orders series by SeriesInstanceUID.
+func SortSeriesList(seriesList []SeriesInfo) {
+	sort.SliceStable(seriesList, func(i, j int) bool {
+		return seriesList[i].SeriesInstanceUID < seriesList[j].SeriesInstanceUID
+	})
+}
+
+// SortInstanceInfos orders instances by InstanceNumber when available, then by
+// SOPInstanceUID.
 func SortInstanceInfos(instances []InstanceInfo) {
 	sort.SliceStable(instances, func(i, j int) bool {
 		left := instances[i]
@@ -260,6 +232,42 @@ func SortInstanceInfos(instances []InstanceInfo) {
 
 		return left.Ref.SOPInstanceUID < right.Ref.SOPInstanceUID
 	})
+}
+
+func dicomFilePaths(root string) ([]string, error) {
+	var paths []string
+
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if entry.IsDir() {
+			return nil
+		}
+
+		if strings.ToLower(filepath.Ext(entry.Name())) != ".dcm" {
+			return nil
+		}
+
+		paths = append(paths, path)
+		return nil
+	})
+
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, Wrap(ErrorKindNotFound, err)
+		}
+		return nil, Wrap(ErrorKindUpstream, err)
+	}
+
+	if len(paths) == 0 {
+		return nil, Wrap(ErrorKindNotFound, fmt.Errorf("no dicom files foind in %s", root))
+	}
+
+	sort.Strings(paths)
+
+	return paths, nil
 }
 
 func readLocalInstanceInfo(path string) (InstanceInfo, error) {

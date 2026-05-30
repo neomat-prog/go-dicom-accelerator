@@ -26,6 +26,7 @@ func New(ctx context.Context, bucketName, prefix string) (*Source, error) {
 	}, nil
 }
 
+// Probe verifies that objects under the configured prefix can be listed.
 func (s *Source) Probe(ctx context.Context) error {
 	it := s.bucket.Objects(ctx, &storage.Query{Prefix: s.prefix})
 	if _, err := it.Next(); err != nil && err != iterator.Done {
@@ -34,51 +35,7 @@ func (s *Source) Probe(ctx context.Context) error {
 	return nil
 }
 
-func (s *Source) listObjects(ctx context.Context) ([]*storage.ObjectAttrs, error) {
-	var objects []*storage.ObjectAttrs
-
-	it := s.bucket.Objects(ctx, &storage.Query{Prefix: s.prefix})
-	for {
-		attrs, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, source.Wrap(source.ErrorKindUpstream, fmt.Errorf("list gcs objects: %w", err))
-		}
-		if strings.HasSuffix(attrs.Name, ".dcm") {
-			objects = append(objects, attrs)
-		}
-	}
-
-	if len(objects) == 0 {
-		return nil, source.Wrap(source.ErrorKindNotFound, fmt.Errorf("no dicom objects found under prefix %q", s.prefix))
-	}
-	return objects, nil
-}
-
-// objectName builds the GCS object path from an InstanceRef.
-// Convention: {prefix}{studyUID}/{seriesUID}/{sopUID}.dcm
-func (s *Source) objectName(ref source.InstanceRef) string {
-	return s.prefix + ref.StudyInstanceUID + "/" + ref.SeriesInstanceUID + "/" + ref.SOPInstanceUID + ".dcm"
-}
-
-// parseRefFromObjectName extracts UIDs from a path like:
-// "prefix/studyUID/seriesUID/sopUID.dcm"
-func parseRefFromObjectName(name string) (source.InstanceRef, bool) {
-	trimmed := strings.TrimSuffix(name, ".dcm")
-	parts := strings.Split(trimmed, "/")
-	if len(parts) < 3 {
-		return source.InstanceRef{}, false
-	}
-	n := len(parts)
-	return source.InstanceRef{
-		StudyInstanceUID:  parts[n-3],
-		SeriesInstanceUID: parts[n-2],
-		SOPInstanceUID:    parts[n-1],
-	}, true
-}
-
+// SeriesInstances lists instances matching studyUID and seriesUID.
 func (s *Source) SeriesInstances(ctx context.Context, studyUID, seriesUID string) ([]source.InstanceInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -112,6 +69,7 @@ func (s *Source) SeriesInstances(ctx context.Context, studyUID, seriesUID string
 	return instances, nil
 }
 
+// StudySeries groups GCS objects by study and series identifiers.
 func (s *Source) StudySeries(ctx context.Context, studyUID string) ([]source.SeriesInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -160,6 +118,7 @@ func (s *Source) StudySeries(ctx context.Context, studyUID string) ([]source.Ser
 	return seriesList, nil
 }
 
+// StudyMetadata returns identifiers from the first matching GCS object.
 func (s *Source) StudyMetadata(ctx context.Context, studyUID string) (source.Metadata, error) {
 	instances, err := s.SeriesInstances(ctx, studyUID, "")
 	if err != nil {
@@ -173,6 +132,7 @@ func (s *Source) StudyMetadata(ctx context.Context, studyUID string) (source.Met
 	}, nil
 }
 
+// Instance opens the GCS object matching ref.
 func (s *Source) Instance(ctx context.Context, ref source.InstanceRef) (source.Response, error) {
 	if err := ctx.Err(); err != nil {
 		return source.Response{}, err
@@ -200,4 +160,45 @@ func (s *Source) Instance(ctx context.Context, ref source.InstanceRef) (source.R
 		ContentLength: attrs.Size,
 		Filename:      ref.SOPInstanceUID + ".dcm",
 	}, nil
+}
+
+func (s *Source) listObjects(ctx context.Context) ([]*storage.ObjectAttrs, error) {
+	var objects []*storage.ObjectAttrs
+
+	it := s.bucket.Objects(ctx, &storage.Query{Prefix: s.prefix})
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, source.Wrap(source.ErrorKindUpstream, fmt.Errorf("list gcs objects: %w", err))
+		}
+		if strings.HasSuffix(attrs.Name, ".dcm") {
+			objects = append(objects, attrs)
+		}
+	}
+
+	if len(objects) == 0 {
+		return nil, source.Wrap(source.ErrorKindNotFound, fmt.Errorf("no dicom objects found under prefix %q", s.prefix))
+	}
+	return objects, nil
+}
+
+func (s *Source) objectName(ref source.InstanceRef) string {
+	return s.prefix + ref.StudyInstanceUID + "/" + ref.SeriesInstanceUID + "/" + ref.SOPInstanceUID + ".dcm"
+}
+
+func parseRefFromObjectName(name string) (source.InstanceRef, bool) {
+	trimmed := strings.TrimSuffix(name, ".dcm")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) < 3 {
+		return source.InstanceRef{}, false
+	}
+	n := len(parts)
+	return source.InstanceRef{
+		StudyInstanceUID:  parts[n-3],
+		SeriesInstanceUID: parts[n-2],
+		SOPInstanceUID:    parts[n-1],
+	}, true
 }

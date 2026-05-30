@@ -52,9 +52,10 @@ func main() {
 
 	log.Println("Starting server on", cfg.ServerAddr)
 	log.Fatal(server.ListenAndServe())
-
 }
 
+// buildSource creates the configured backend and returns the interfaces needed
+// by the HTTP gateway.
 func buildSource(cfg config.Config) (source.Source, source.StudyLister, source.Prober, error) {
 	switch cfg.SourceType {
 	case "local-directory":
@@ -72,8 +73,9 @@ func buildSource(cfg config.Config) (source.Source, source.StudyLister, source.P
 	}
 }
 
+// runAcceleratorSmokeTest fetches a representative window to verify discovery
+// and accelerator wiring at startup.
 func runAcceleratorSmokeTest(ctx context.Context, lister source.StudyLister, fetcher *dicomfetch.Fetcher) error {
-
 	seriesList, err := lister.StudySeries(ctx, "")
 	if err != nil {
 		return err
