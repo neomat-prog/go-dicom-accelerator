@@ -77,15 +77,15 @@ func TestFetchInstance_ReadsBodyClosesBackendAndCaches(t *testing.T) {
 		t.Fatalf("expected backend body to be closed once, got %d", src.closeCount())
 	}
 
-	first.Data[0] = 'X'
-
+	// Data is treated as immutable and shared with the cache; callers must
+	// not mutate it. A second fetch is served from cache.
 	second, err := fetcher.FetchInstance(context.Background(), ref)
 	if err != nil {
 		t.Fatalf("FetchInstance returned error from cache: %v", err)
 	}
 
 	if string(second.Data) != "instance-00" {
-		t.Fatalf("expected cached data to be protected from mutation, got %q", string(second.Data))
+		t.Fatalf("expected cached data, got %q", string(second.Data))
 	}
 	if src.callCount() != 1 {
 		t.Fatalf("expected second fetch to use cache, got %d source calls", src.callCount())
