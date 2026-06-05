@@ -27,7 +27,7 @@ type PrefetchManager struct {
 	lister  source.StudyLister
 	fetcher *dicomfetch.Fetcher
 
-	mut     sync.RWMutex
+	mu      sync.RWMutex
 	nextID  int
 	jobs    map[string]*PrefetchJob
 	cancels map[string]context.CancelFunc
@@ -100,10 +100,10 @@ func (m *PrefetchManager) Start(ctx context.Context, studyUID string, req Prefet
 		CurrentBatch:     1,
 	}
 
-	m.mut.Lock()
+	m.mu.Lock()
 	m.jobs[job.JobID] = &job
 	m.cancels[job.JobID] = cancel
-	m.mut.Unlock()
+	m.mu.Unlock()
 
 	go m.run(jobCtx, job.JobID, selected, batchSize)
 
@@ -112,8 +112,8 @@ func (m *PrefetchManager) Start(ctx context.Context, studyUID string, req Prefet
 
 // Status returns a snapshot of one prefetch job.
 func (m *PrefetchManager) Status(jobID string) (PrefetchJob, error) {
-	m.mut.RLock()
-	defer m.mut.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	job := m.jobs[jobID]
 	if job == nil {
@@ -125,8 +125,8 @@ func (m *PrefetchManager) Status(jobID string) (PrefetchJob, error) {
 
 // Delete cancels and removes one tracked prefetch job.
 func (m *PrefetchManager) Delete(jobID string) error {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	job := m.jobs[jobID]
 	if job == nil {
 		return source.Wrap(source.ErrorKindNotFound, fmt.Errorf("prefetch job %q not found", jobID))
@@ -243,16 +243,16 @@ func (m *PrefetchManager) prefetchSeries(ctx context.Context, jobID string, seri
 }
 
 func (m *PrefetchManager) nextJobID() string {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	m.nextID++
 	return fmt.Sprintf("prefetch-%d", m.nextID)
 }
 
 func (m *PrefetchManager) setCurrentBatch(jobID string, batch int) {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if job := m.jobs[jobID]; job != nil {
 		job.CurrentBatch = batch
@@ -260,8 +260,8 @@ func (m *PrefetchManager) setCurrentBatch(jobID string, batch int) {
 }
 
 func (m *PrefetchManager) addSeriesProgress(jobID string, instances int, bytesLoaded int64) {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if job := m.jobs[jobID]; job != nil {
 		job.SeriesCompleted++
@@ -271,8 +271,8 @@ func (m *PrefetchManager) addSeriesProgress(jobID string, instances int, bytesLo
 }
 
 func (m *PrefetchManager) addError(jobID string, msg string) {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if job := m.jobs[jobID]; job != nil {
 		job.Errors = append(job.Errors, msg)
@@ -280,8 +280,8 @@ func (m *PrefetchManager) addError(jobID string, msg string) {
 }
 
 func (m *PrefetchManager) finish(jobID string) {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	job := m.jobs[jobID]
 	if job == nil {

@@ -26,7 +26,7 @@ type Fetcher struct {
 	Source  source.Source
 	Options Options
 
-	mut        sync.Mutex
+	mu         sync.Mutex
 	cache      map[string]FetchedInstance
 	cacheBytes int64
 }
@@ -83,8 +83,8 @@ func (f *Fetcher) CacheSize() int {
 	if f == nil {
 		return 0
 	}
-	f.mut.Lock()
-	defer f.mut.Unlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return len(f.cache)
 }
 
@@ -93,8 +93,8 @@ func (f *Fetcher) CacheBytes() int64 {
 	if f == nil {
 		return 0
 	}
-	f.mut.Lock()
-	defer f.mut.Unlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.cacheBytes
 }
 
@@ -257,7 +257,7 @@ func (f *Fetcher) WarmSeries(ctx context.Context, refs []source.InstanceRef) (in
 	sem := make(chan struct{}, f.Options.MaxConcurrency)
 
 	var wg sync.WaitGroup
-	var mut sync.Mutex
+	var mu sync.Mutex
 	var errs []error
 	var bytesLoaded int64
 	var completed int
@@ -274,8 +274,8 @@ outer:
 			defer wg.Done()
 			defer func() { <-sem }()
 			fi, err := f.FetchInstance(ctx, ref)
-			mut.Lock()
-			defer mut.Unlock()
+			mu.Lock()
+			defer mu.Unlock()
 			if err != nil {
 				errs = append(errs, fmt.Errorf("warm instance %q: %w", ref.SOPInstanceUID, err))
 				return
@@ -315,7 +315,7 @@ func (f *Fetcher) fetchRefs(ctx context.Context, refs []source.InstanceRef, labe
 	sem := make(chan struct{}, f.Options.MaxConcurrency)
 
 	var wg sync.WaitGroup
-	var mut sync.Mutex
+	var mu sync.Mutex
 	var errs []error
 outer:
 	for i, ref := range refs {
@@ -334,9 +334,9 @@ outer:
 
 			instance, err := f.FetchInstance(ctx, ref)
 			if err != nil {
-				mut.Lock()
+				mu.Lock()
 				errs = append(errs, fmt.Errorf("fetch instance %q: %w", ref.SOPInstanceUID, err))
-				mut.Unlock()
+				mu.Unlock()
 
 				cancel()
 				return
@@ -361,8 +361,8 @@ outer:
 }
 
 func (f *Fetcher) getCached(ref source.InstanceRef) (FetchedInstance, bool) {
-	f.mut.Lock()
-	defer f.mut.Unlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	got, ok := f.cache[cacheKey(ref)]
 	if !ok {
@@ -372,8 +372,8 @@ func (f *Fetcher) getCached(ref source.InstanceRef) (FetchedInstance, bool) {
 }
 
 func (f *Fetcher) setCached(instance FetchedInstance) {
-	f.mut.Lock()
-	defer f.mut.Unlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	if f.cache == nil {
 		f.cache = make(map[string]FetchedInstance)
