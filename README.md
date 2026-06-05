@@ -191,6 +191,33 @@ Prefetch status response:
 }
 ```
 
+## Performance
+
+The point of the accelerator is that the *second* read of a study is served
+from memory instead of the backend. `scripts/bench_prefetch.sh` measures it
+end-to-end: it prefetches a series cold (streamed from the backend) and then
+again warm (served from the in-memory LRU cache).
+
+```bash
+# 1. start the server fresh so the cache is empty
+FETCH_MAX_CONCURRENCY=32 go run ./cmd/server &
+
+# 2. run the benchmark (auto-discovers the largest series)
+scripts/bench_prefetch.sh
+```
+
+Sample run against a GCS bucket, one 389-instance series (78 MB):
+
+| Run | Source | Concurrency | Elapsed | Throughput | Per instance |
+| --- | --- | --- | --- | --- | --- |
+| Cold | GCS | 6 | 52.4 s | 1.5 MB/s | 135 ms |
+| Cold | GCS | 32 | 9.5 s | 8.2 MB/s | 24 ms |
+| Warm | LRU cache | — | 1.2 s | 66 MB/s | 3 ms |
+
+- **Warm ~40× cold.** Cache working. Ratio is network-independent; treat absolute MB/s as a sample.
+- **Cold is round-trip bound.** Scales with `FETCH_MAX_CONCURRENCY` (6 to 32 cut it 5.5×).
+- Cache is byte-bounded (`FETCH_MAX_CACHE_BYTES`, default 1 GiB), evicts least-recently-used.
+
 ## Development
 
 ```bash
