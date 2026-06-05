@@ -26,9 +26,7 @@ type Fetcher struct {
 	Source  source.Source
 	Options Options
 
-	mu         sync.Mutex
-	cache      map[string]FetchedInstance
-	cacheBytes int64
+	cache *instanceCache
 }
 
 type FetchedInstance struct {
@@ -71,35 +69,29 @@ func (o Options) Normalize() Options {
 }
 
 func New(src source.Source, options Options) *Fetcher {
+	opts := options.Normalize()
 	return &Fetcher{
 		Source:  src,
-		Options: options.Normalize(),
-		cache:   make(map[string]FetchedInstance),
+		Options: opts,
+		cache:   newInstanceCache(opts.MaxCacheBytes),
 	}
 }
 
 // CacheSize returns the number of cached instances.
 func (f *Fetcher) CacheSize() int {
-	if f == nil {
+	if f == nil || f.cache == nil {
 		return 0
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.cache)
+	return f.cache.size()
 }
 
-// CacheBytes returns the number of DICOM bytes currently held in cache.
 func (f *Fetcher) CacheBytes() int64 {
-	if f == nil {
+	if f == nil || f.cache == nil {
 		return 0
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.cacheBytes
+	return f.cache.bytes()
 }
 
-// Response converts the fetched bytes into a source.Response with a fresh
-// reader.
 func (i FetchedInstance) Response() source.Response {
 	return source.Response{
 		Body:          io.NopCloser(bytes.NewReader(i.Data)),
@@ -154,7 +146,6 @@ func SelectWindow(refs []source.InstanceRef, center int, behind int, ahead int) 
 	return window, nil
 }
 
-// FetchInstance returns one DICOM instance, using the cache when possible.
 func (f *Fetcher) FetchInstance(ctx context.Context, ref source.InstanceRef) (FetchedInstance, error) {
 	if f == nil {
 		return FetchedInstance{}, errors.New("fetcher cannot be nil")
@@ -197,10 +188,9 @@ func (f *Fetcher) FetchInstance(ctx context.Context, ref source.InstanceRef) (Fe
 
 	f.setCached(got)
 	log.Printf("dicomfetch: fetched sop=%s bytes=%d", got.Ref.SOPInstanceUID, len(got.Data))
-	return cloneFetchedInstance(got), nil
+	return got, nil
 }
 
-// FetchWindow fetches a sliding window of instances around center.
 func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, center int) ([]FetchedInstance, error) {
 	if f == nil {
 		return nil, errors.New("dicomfetch: nil fetcher")
@@ -224,7 +214,6 @@ func (f *Fetcher) FetchWindow(ctx context.Context, refs []source.InstanceRef, ce
 	return f.fetchRefs(ctx, window, "window")
 }
 
-// FetchSeries fetches all refs in a series with bounded concurrency.
 func (f *Fetcher) FetchSeries(ctx context.Context, refs []source.InstanceRef) ([]FetchedInstance, error) {
 	if f == nil {
 		return nil, errors.New("dicomfetch: nil fetcher")
@@ -361,45 +350,11 @@ outer:
 }
 
 func (f *Fetcher) getCached(ref source.InstanceRef) (FetchedInstance, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	got, ok := f.cache[cacheKey(ref)]
-	if !ok {
-		return FetchedInstance{}, false
-	}
-	return cloneFetchedInstance(got), true
+	return f.cache.get(cacheKey(ref))
 }
 
 func (f *Fetcher) setCached(instance FetchedInstance) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	if f.cache == nil {
-		f.cache = make(map[string]FetchedInstance)
-	}
-	key := cacheKey(instance.Ref)
-	if existing, ok := f.cache[key]; ok {
-		f.cacheBytes -= int64(len(existing.Data))
-	}
-	cloned := cloneFetchedInstance(instance)
-	newBytes := int64(len(cloned.Data))
-	if f.Options.MaxCacheBytes > 0 {
-		for f.cacheBytes+newBytes > f.Options.MaxCacheBytes && len(f.cache) > 0 {
-			for k, v := range f.cache {
-				f.cacheBytes -= int64(len(v.Data))
-				delete(f.cache, k)
-				break
-			}
-		}
-	}
-	f.cache[key] = cloned
-	f.cacheBytes += newBytes
-}
-
-func cloneFetchedInstance(instance FetchedInstance) FetchedInstance {
-	instance.Data = append([]byte(nil), instance.Data...)
-	return instance
+	f.cache.put(cacheKey(instance.Ref), instance)
 }
 
 func cacheKey(ref source.InstanceRef) string {

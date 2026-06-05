@@ -35,6 +35,7 @@ func main() {
 		WindowBehind:   cfg.WindowBehind,
 		WindowAhead:    cfg.WindowAhead,
 		RequestTimeout: cfg.RequestTimeout,
+		MaxCacheBytes:  cfg.MaxCacheBytes,
 	})
 
 	if cfg.RunSmokeTest {

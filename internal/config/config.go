@@ -23,6 +23,7 @@ const (
 	windowBehindKey       = "FETCH_WINDOW_BEHIND"
 	windowAheadKey        = "FETCH_WINDOW_AHEAD"
 	requestTimeoutKey     = "FETCH_REQUEST_TIMEOUT"
+	maxCacheBytesKey      = "FETCH_MAX_CACHE_BYTES"
 	runSmokeTestKey       = "RUN_SMOKE_TEST"
 	defaultServerAddr     = ":8081"
 	defaultSourceType     = "local-directory"
@@ -30,6 +31,7 @@ const (
 	defaultWindowBehind   = 3
 	defaultWindowAhead    = 3
 	defaultRequestTimeout = 30 * time.Second
+	defaultMaxCacheBytes  = 1 << 30 // 1 GiB
 	sourceTypeLocalDir    = "local-directory"
 	sourceTypeGCS         = "gcs"
 )
@@ -49,6 +51,7 @@ type Config struct {
 	WindowBehind   int
 	WindowAhead    int
 	RequestTimeout time.Duration
+	MaxCacheBytes  int64
 
 	RunSmokeTest bool
 }
@@ -90,6 +93,11 @@ func Load(envPath string) (Config, error) {
 		return Config{}, err
 	}
 
+	maxCacheBytes, err := configInt64(fileValues, maxCacheBytesKey, defaultMaxCacheBytes)
+	if err != nil {
+		return Config{}, err
+	}
+
 	runSmokeTest, err := configBool(fileValues, runSmokeTestKey, false)
 	if err != nil {
 		return Config{}, err
@@ -105,6 +113,7 @@ func Load(envPath string) (Config, error) {
 		WindowBehind:   windowBehind,
 		WindowAhead:    windowAhead,
 		RequestTimeout: requestTimeout,
+		MaxCacheBytes:  maxCacheBytes,
 		RunSmokeTest:   runSmokeTest,
 	}
 
@@ -155,6 +164,9 @@ func (c Config) Validate() error {
 	if c.RequestTimeout < 0 {
 		return fmt.Errorf("%s cannot be negative", requestTimeoutKey)
 	}
+	if c.MaxCacheBytes < 0 {
+		return fmt.Errorf("%s cannot be negative", maxCacheBytesKey)
+	}
 
 	return nil
 }
@@ -178,6 +190,19 @@ func configInt(fileValues map[string]string, key string, fallback int) (int, err
 	}
 
 	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
+	}
+	return value, nil
+}
+
+func configInt64(fileValues map[string]string, key string, fallback int64) (int64, error) {
+	raw, _ := configValue(fileValues, key)
+	if raw == "" {
+		return fallback, nil
+	}
+
+	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
 	}
