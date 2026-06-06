@@ -4,15 +4,33 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"cloud.google.com/go/storage"
 	"github.com/neomat-prog/go-dicom-gateway/source"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/api/iterator"
 )
+
+// DefaultIndexTTL bounds how long the object index is reused before relist
+const DefaultIndexTTL = 30 * time.Second
 
 type Source struct {
 	bucket *storage.BucketHandle
 	prefix string
+
+	mu       sync.RWMutex
+	index    *gcsIndex
+	indexTTL time.Duration
+	group    singleflight.Group
+	now      func() time.Time // for tests
+}
+
+type gcsIndex struct {
+	builtAt time.Time
+	all     []source.InstanceInfo
+	series  []source.SeriesInfo
 }
 
 func New(ctx context.Context, bucketName, prefix string) (*Source, error) {
@@ -21,9 +39,79 @@ func New(ctx context.Context, bucketName, prefix string) (*Source, error) {
 		return nil, source.Wrap(source.ErrorKindUpstream, fmt.Errorf("create gcs client: %w", err))
 	}
 	return &Source{
-		bucket: client.Bucket(bucketName),
-		prefix: prefix,
+		bucket:   client.Bucket(bucketName),
+		prefix:   prefix,
+		indexTTL: DefaultIndexTTL,
 	}, nil
+}
+
+func (s *Source) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+func (s *Source) loadIndex(ctx context.Context) (*gcsIndex, error) {
+	s.mu.RLock()
+	idx := s.index
+	s.mu.RUnlock()
+	if idx != nil && s.clock().Sub(idx.builtAt) < s.indexTTL {
+		return idx, nil
+	}
+
+	v, err, _ := s.group.Do("index", func() (any, error) {
+		built, err := s.buildIndex(ctx)
+		if err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		s.index = built
+		s.mu.Unlock()
+		return built, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*gcsIndex), nil
+}
+
+func (s *Source) buildIndex(ctx context.Context) (*gcsIndex, error) {
+	objects, err := s.listObjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	idx := &gcsIndex{builtAt: s.clock()}
+	seriesByUID := make(map[string]*source.SeriesInfo)
+
+	for _, attrs := range objects {
+		ref, ok := parseRefFromObjectName(attrs.Name)
+		if !ok {
+			continue
+		}
+		info := source.InstanceInfo{Ref: ref}
+		idx.all = append(idx.all, info)
+
+		key := ref.StudyInstanceUID + "\x00" + ref.SeriesInstanceUID
+		series, ok := seriesByUID[key]
+		if !ok {
+			series = &source.SeriesInfo{
+				StudyInstanceUID:  ref.StudyInstanceUID,
+				SeriesInstanceUID: ref.SeriesInstanceUID,
+			}
+			seriesByUID[key] = series
+		}
+		series.Instances = append(series.Instances, info)
+	}
+
+	source.SortInstanceInfos(idx.all)
+	for _, series := range seriesByUID {
+		source.SortInstanceInfos(series.Instances)
+		idx.series = append(idx.series, *series)
+	}
+	source.SortSeriesList(idx.series)
+	return idx, nil
 }
 
 // Probe verifies that objects under the configured prefix can be listed.
@@ -37,85 +125,45 @@ func (s *Source) Probe(ctx context.Context) error {
 
 // SeriesInstances lists instances matching studyUID and seriesUID.
 func (s *Source) SeriesInstances(ctx context.Context, studyUID, seriesUID string) ([]source.InstanceInfo, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	objects, err := s.listObjects(ctx)
+	idx, err := s.loadIndex(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	var instances []source.InstanceInfo
-	for _, attrs := range objects {
-		ref, ok := parseRefFromObjectName(attrs.Name)
-		if !ok {
+	for _, info := range idx.all {
+		if studyUID != "" && info.Ref.StudyInstanceUID != studyUID {
 			continue
 		}
-		if studyUID != "" && ref.StudyInstanceUID != studyUID {
+		if seriesUID != "" && info.Ref.SeriesInstanceUID != seriesUID {
 			continue
 		}
-		if seriesUID != "" && ref.SeriesInstanceUID != seriesUID {
-			continue
-		}
-		instances = append(instances, source.InstanceInfo{Ref: ref})
+		instances = append(instances, info)
 	}
-
 	if len(instances) == 0 {
 		return nil, source.Wrap(source.ErrorKindNotFound, fmt.Errorf("series not found"))
 	}
-
-	source.SortInstanceInfos(instances)
-	return instances, nil
+	return instances, nil // idx.all already sorted
 }
 
 // StudySeries groups GCS objects by study and series identifiers.
 func (s *Source) StudySeries(ctx context.Context, studyUID string) ([]source.SeriesInfo, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	objects, err := s.listObjects(ctx)
+	idx, err := s.loadIndex(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	seriesByUID := make(map[string]*source.SeriesInfo)
-
-	for _, attrs := range objects {
-		ref, ok := parseRefFromObjectName(attrs.Name)
-		if !ok {
+	var out []source.SeriesInfo
+	for _, series := range idx.series {
+		if studyUID != "" && series.StudyInstanceUID != studyUID {
 			continue
 		}
-		if studyUID != "" && ref.StudyInstanceUID != studyUID {
-			continue
-		}
-
-		key := ref.StudyInstanceUID + "\x00" + ref.SeriesInstanceUID
-
-		series, ok := seriesByUID[key]
-		if !ok {
-			series = &source.SeriesInfo{
-				StudyInstanceUID:  ref.StudyInstanceUID,
-				SeriesInstanceUID: ref.SeriesInstanceUID,
-			}
-			seriesByUID[key] = series
-		}
-		series.Instances = append(series.Instances, source.InstanceInfo{Ref: ref})
+		out = append(out, series)
 	}
-
-	if len(seriesByUID) == 0 {
+	if len(out) == 0 {
 		return nil, source.Wrap(source.ErrorKindNotFound, fmt.Errorf("study not found"))
 	}
-
-	seriesList := make([]source.SeriesInfo, 0, len(seriesByUID))
-	for _, series := range seriesByUID {
-		source.SortInstanceInfos(series.Instances)
-		seriesList = append(seriesList, *series)
-	}
-
-	source.SortSeriesList(seriesList)
-	return seriesList, nil
+	return out, nil
 }
 
 // StudyMetadata returns identifiers from the first matching GCS object.
@@ -136,6 +184,10 @@ func (s *Source) StudyMetadata(ctx context.Context, studyUID string) (source.Met
 func (s *Source) Instance(ctx context.Context, ref source.InstanceRef) (source.Response, error) {
 	if err := ctx.Err(); err != nil {
 		return source.Response{}, err
+	}
+
+	if !source.ValidUID(ref.StudyInstanceUID) || !source.ValidUID(ref.SeriesInstanceUID) || !source.ValidUID(ref.SOPInstanceUID) {
+		return source.Response{}, source.Wrap(source.ErrorKindBadRequest, fmt.Errorf("invalid UID in instance ref"))
 	}
 
 	name := s.objectName(ref)

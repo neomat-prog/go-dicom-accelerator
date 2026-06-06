@@ -19,6 +19,10 @@ func acceleratedInstanceHandler(lister source.StudyLister, fetcher *dicomfetch.F
 		seriesUID := r.PathValue("seriesUID")
 		instanceUID := r.PathValue("instanceUID")
 
+		if !requireUIDs(w, studyUID, seriesUID, instanceUID) {
+			return
+		}
+
 		seriesList, err := lister.StudySeries(r.Context(), studyUID)
 		if err != nil {
 			writeSourceError(w, err)
@@ -113,6 +117,10 @@ func studySeriesHandler(lister source.StudyLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		studyUID := r.PathValue("studyUID")
 
+		if !requireUIDs(w, studyUID) {
+			return
+		}
+
 		seriesList, err := lister.StudySeries(r.Context(), studyUID)
 		if err != nil {
 			writeSourceError(w, err)
@@ -145,6 +153,10 @@ func seriesInstancesHandler(lister source.StudyLister) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		studyUID := r.PathValue("studyUID")
 		seriesUID := r.PathValue("seriesUID")
+
+		if !requireUIDs(w, studyUID, seriesUID) {
+			return
+		}
 
 		seriesList, err := lister.StudySeries(r.Context(), studyUID)
 		if err != nil {
@@ -181,6 +193,19 @@ func seriesInstancesHandler(lister source.StudyLister) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(resp)
 	}
+}
+
+// requireUIDs rejects the request with 400 if any path UID is not a valid
+// DICOM UID. Returns false when a response has already been written.
+func requireUIDs(w http.ResponseWriter, uids ...string) bool {
+	for _, uid := range uids {
+		if !source.ValidUID(uid) {
+			writeSourceError(w, source.Wrap(source.ErrorKindBadRequest,
+				fmt.Errorf("invalid DICOM UID %q", uid)))
+			return false
+		}
+	}
+	return true
 }
 
 func findSeries(seriesList []source.SeriesInfo, seriesUID string) ([]source.InstanceInfo, error) {

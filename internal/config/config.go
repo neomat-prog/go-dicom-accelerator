@@ -2,7 +2,6 @@ package config
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,39 +15,35 @@ const (
 
 	serverAddrKey         = "SERVER_ADDR"
 	sourceTypeKey         = "SOURCE_TYPE"
-	localDICOMRootKey     = "LOCAL_DICOM_ROOT"
 	gcsBucketKey          = "GCS_BUCKET"
 	gcsPrefixKey          = "GCS_PREFIX"
 	maxConcurrencyKey     = "FETCH_MAX_CONCURRENCY"
 	windowBehindKey       = "FETCH_WINDOW_BEHIND"
 	windowAheadKey        = "FETCH_WINDOW_AHEAD"
 	requestTimeoutKey     = "FETCH_REQUEST_TIMEOUT"
+	maxCacheBytesKey      = "FETCH_MAX_CACHE_BYTES"
 	runSmokeTestKey       = "RUN_SMOKE_TEST"
 	defaultServerAddr     = ":8081"
-	defaultSourceType     = "local-directory"
+	defaultSourceType     = "gcs"
 	defaultMaxConcurrency = 6
 	defaultWindowBehind   = 3
 	defaultWindowAhead    = 3
 	defaultRequestTimeout = 30 * time.Second
-	sourceTypeLocalDir    = "local-directory"
+	defaultMaxCacheBytes  = 1 << 30 // 1 GiB
 	sourceTypeGCS         = "gcs"
 )
 
-// ErrMissingLocalDICOMRoot is returned when a local-directory source has no
-// configured root directory.
-var ErrMissingLocalDICOMRoot = errors.New("LOCAL_DICOM_ROOT is required for local-directory source")
-
 type Config struct {
-	ServerAddr     string
-	SourceType     string
-	LocalDICOMRoot string
-	GCSBucket      string
-	GCSPrefix      string
+	ServerAddr string
+	SourceType string
+	GCSBucket  string
+	GCSPrefix  string
 
 	MaxConcurrency int
 	WindowBehind   int
 	WindowAhead    int
 	RequestTimeout time.Duration
+	MaxCacheBytes  int64
 
 	RunSmokeTest bool
 }
@@ -58,7 +53,7 @@ func Load(envPath string) (Config, error) {
 		envPath = defaultEnvFile
 	}
 
-	fileValues, envDir, err := readDotEnv(envPath)
+	fileValues, _, err := readDotEnv(envPath)
 	if err != nil {
 		return Config{}, err
 	}
@@ -66,7 +61,6 @@ func Load(envPath string) (Config, error) {
 	serverAddr := configString(fileValues, serverAddrKey, defaultServerAddr)
 	sourceType := configString(fileValues, sourceTypeKey, defaultSourceType)
 
-	localRoot, localRootFromDotEnv := configPath(fileValues, localDICOMRootKey)
 	gcsBucket := configString(fileValues, gcsBucketKey, "")
 	gcsPrefix := configString(fileValues, gcsPrefixKey, "")
 
@@ -90,6 +84,11 @@ func Load(envPath string) (Config, error) {
 		return Config{}, err
 	}
 
+	maxCacheBytes, err := configInt64(fileValues, maxCacheBytesKey, defaultMaxCacheBytes)
+	if err != nil {
+		return Config{}, err
+	}
+
 	runSmokeTest, err := configBool(fileValues, runSmokeTestKey, false)
 	if err != nil {
 		return Config{}, err
@@ -98,13 +97,13 @@ func Load(envPath string) (Config, error) {
 	cfg := Config{
 		ServerAddr:     serverAddr,
 		SourceType:     sourceType,
-		LocalDICOMRoot: normalizePath(localRoot, envDir, localRootFromDotEnv),
 		GCSBucket:      gcsBucket,
 		GCSPrefix:      gcsPrefix,
 		MaxConcurrency: maxConcurrency,
 		WindowBehind:   windowBehind,
 		WindowAhead:    windowAhead,
 		RequestTimeout: requestTimeout,
+		MaxCacheBytes:  maxCacheBytes,
 		RunSmokeTest:   runSmokeTest,
 	}
 
@@ -122,19 +121,6 @@ func (c Config) Validate() error {
 	}
 
 	switch c.SourceType {
-	case sourceTypeLocalDir:
-		if strings.TrimSpace(c.LocalDICOMRoot) == "" {
-			return ErrMissingLocalDICOMRoot
-		}
-
-		info, err := os.Stat(c.LocalDICOMRoot)
-		if err != nil {
-			return fmt.Errorf("stat %s: %w", c.LocalDICOMRoot, err)
-		}
-
-		if !info.IsDir() {
-			return fmt.Errorf("%s must point to a directory", localDICOMRootKey)
-		}
 	case sourceTypeGCS:
 		if strings.TrimSpace(c.GCSBucket) == "" {
 			return fmt.Errorf("GCS_BUCKET is required for gcs source")
@@ -155,6 +141,9 @@ func (c Config) Validate() error {
 	if c.RequestTimeout < 0 {
 		return fmt.Errorf("%s cannot be negative", requestTimeoutKey)
 	}
+	if c.MaxCacheBytes < 0 {
+		return fmt.Errorf("%s cannot be negative", maxCacheBytesKey)
+	}
 
 	return nil
 }
@@ -167,10 +156,6 @@ func configString(fileValues map[string]string, key string, fallback string) str
 	return value
 }
 
-func configPath(fileValues map[string]string, key string) (string, bool) {
-	return configValue(fileValues, key)
-}
-
 func configInt(fileValues map[string]string, key string, fallback int) (int, error) {
 	raw, _ := configValue(fileValues, key)
 	if raw == "" {
@@ -178,6 +163,19 @@ func configInt(fileValues map[string]string, key string, fallback int) (int, err
 	}
 
 	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
+	}
+	return value, nil
+}
+
+func configInt64(fileValues map[string]string, key string, fallback int64) (int64, error) {
+	raw, _ := configValue(fileValues, key)
+	if raw == "" {
+		return fallback, nil
+	}
+
+	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
 	}
@@ -261,27 +259,6 @@ func readDotEnv(path string) (map[string]string, string, error) {
 	}
 
 	return values, filepath.Dir(resolvedPath), nil
-}
-
-func normalizePath(path, baseDir string, fromDotEnv bool) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path)
-	}
-
-	if fromDotEnv && baseDir != "" {
-		return filepath.Clean(filepath.Join(baseDir, path))
-	}
-
-	if wd, err := os.Getwd(); err == nil {
-		return filepath.Clean(filepath.Join(wd, path))
-	}
-
-	return filepath.Clean(path)
 }
 
 func resolveDotEnvPath(path string) (string, bool, error) {
