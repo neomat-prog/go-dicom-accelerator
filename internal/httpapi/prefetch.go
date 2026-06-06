@@ -2,12 +2,15 @@ package httpapi
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/neomat-prog/go-dicom-gateway/dicomfetch"
 	"github.com/neomat-prog/go-dicom-gateway/source"
@@ -21,17 +24,21 @@ const (
 	PrefetchStatusFailed = "failed"
 
 	defaultSeriesBatchSize = 6
+
+	defaultJobTTL = 10 * time.Minute
 )
 
 type PrefetchManager struct {
 	lister  source.StudyLister
 	fetcher *dicomfetch.Fetcher
 
-	mut     sync.RWMutex
-	nextID  int
-	jobs    map[string]*PrefetchJob
-	cancels map[string]context.CancelFunc
-
+	mu           sync.RWMutex
+	nextID       int
+	jobs         map[string]*PrefetchJob
+	cancels      map[string]context.CancelFunc
+	finished     map[string]time.Time
+	jobTTL       time.Duration
+	now          func() time.Time
 	onBatchStart func(batch int, series []source.SeriesInfo)
 }
 
@@ -61,11 +68,21 @@ type PrefetchStartResponse struct {
 
 func NewPrefetchManager(lister source.StudyLister, fetcher *dicomfetch.Fetcher) *PrefetchManager {
 	return &PrefetchManager{
-		lister:  lister,
-		fetcher: fetcher,
-		jobs:    make(map[string]*PrefetchJob),
-		cancels: make(map[string]context.CancelFunc),
+		lister:   lister,
+		fetcher:  fetcher,
+		jobs:     make(map[string]*PrefetchJob),
+		cancels:  make(map[string]context.CancelFunc),
+		finished: make(map[string]time.Time),
+		jobTTL:   defaultJobTTL,
+		now:      time.Now,
 	}
+}
+
+func (m *PrefetchManager) clock() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
 }
 
 // Start creates a prefetch job for a study and starts it in the background.
@@ -100,10 +117,11 @@ func (m *PrefetchManager) Start(ctx context.Context, studyUID string, req Prefet
 		CurrentBatch:     1,
 	}
 
-	m.mut.Lock()
+	m.mu.Lock()
+	m.sweepLocked()
 	m.jobs[job.JobID] = &job
 	m.cancels[job.JobID] = cancel
-	m.mut.Unlock()
+	m.mu.Unlock()
 
 	go m.run(jobCtx, job.JobID, selected, batchSize)
 
@@ -112,8 +130,8 @@ func (m *PrefetchManager) Start(ctx context.Context, studyUID string, req Prefet
 
 // Status returns a snapshot of one prefetch job.
 func (m *PrefetchManager) Status(jobID string) (PrefetchJob, error) {
-	m.mut.RLock()
-	defer m.mut.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	job := m.jobs[jobID]
 	if job == nil {
@@ -125,8 +143,8 @@ func (m *PrefetchManager) Status(jobID string) (PrefetchJob, error) {
 
 // Delete cancels and removes one tracked prefetch job.
 func (m *PrefetchManager) Delete(jobID string) error {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	job := m.jobs[jobID]
 	if job == nil {
 		return source.Wrap(source.ErrorKindNotFound, fmt.Errorf("prefetch job %q not found", jobID))
@@ -136,13 +154,36 @@ func (m *PrefetchManager) Delete(jobID string) error {
 	}
 	delete(m.jobs, jobID)
 	delete(m.cancels, jobID)
+	delete(m.finished, jobID)
 	return nil
+}
+
+// sweepLocked removes finished jobs older than jobTTL.
+func (m *PrefetchManager) sweepLocked() {
+	if m.jobTTL <= 0 {
+		return
+	}
+	cutoff := m.clock().Add(-m.jobTTL)
+	for id, at := range m.finished {
+		if at.Before(cutoff) {
+			if cancel := m.cancels[id]; cancel != nil {
+				cancel()
+			}
+			delete(m.jobs, id)
+			delete(m.cancels, id)
+			delete(m.finished, id)
+		}
+	}
 }
 
 // prefetchHandler starts a background prefetch job for a study.
 func prefetchHandler(manager *PrefetchManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		studyUID := r.PathValue("studyUID")
+
+		if !requireUIDs(w, studyUID) {
+			return
+		}
 
 		req, err := readPrefetchRequest(r.Body)
 		if err != nil {
@@ -210,7 +251,6 @@ func (m *PrefetchManager) run(ctx context.Context, jobID string, seriesList []so
 
 		var wg sync.WaitGroup
 		for _, series := range batchSeries {
-			series := series
 			wg.Go(func() {
 				m.prefetchSeries(ctx, jobID, series)
 			})
@@ -243,16 +283,18 @@ func (m *PrefetchManager) prefetchSeries(ctx context.Context, jobID string, seri
 }
 
 func (m *PrefetchManager) nextJobID() string {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	m.nextID++
-	return fmt.Sprintf("prefetch-%d", m.nextID)
+	var b [6]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("prefetch-%d-%s", m.nextID, hex.EncodeToString(b[:]))
 }
 
 func (m *PrefetchManager) setCurrentBatch(jobID string, batch int) {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if job := m.jobs[jobID]; job != nil {
 		job.CurrentBatch = batch
@@ -260,8 +302,8 @@ func (m *PrefetchManager) setCurrentBatch(jobID string, batch int) {
 }
 
 func (m *PrefetchManager) addSeriesProgress(jobID string, instances int, bytesLoaded int64) {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if job := m.jobs[jobID]; job != nil {
 		job.SeriesCompleted++
@@ -271,8 +313,8 @@ func (m *PrefetchManager) addSeriesProgress(jobID string, instances int, bytesLo
 }
 
 func (m *PrefetchManager) addError(jobID string, msg string) {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if job := m.jobs[jobID]; job != nil {
 		job.Errors = append(job.Errors, msg)
@@ -280,8 +322,8 @@ func (m *PrefetchManager) addError(jobID string, msg string) {
 }
 
 func (m *PrefetchManager) finish(jobID string) {
-	m.mut.Lock()
-	defer m.mut.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	job := m.jobs[jobID]
 	if job == nil {
@@ -292,6 +334,8 @@ func (m *PrefetchManager) finish(jobID string) {
 		cancel()
 		delete(m.cancels, jobID)
 	}
+
+	m.finished[jobID] = m.clock()
 
 	if len(job.Errors) > 0 {
 		job.Status = PrefetchStatusFailed
