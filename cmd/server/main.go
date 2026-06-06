@@ -59,9 +59,6 @@ func main() {
 // by the HTTP gateway.
 func buildSource(cfg config.Config) (source.Source, source.StudyLister, source.Prober, error) {
 	switch cfg.SourceType {
-	case "local-directory":
-		src := source.NewLocalDirectory(cfg.LocalDICOMRoot)
-		return src, src, src, nil
 	case "gcs":
 		ctx := context.Background()
 		src, err := gcssource.New(ctx, cfg.GCSBucket, cfg.GCSPrefix)

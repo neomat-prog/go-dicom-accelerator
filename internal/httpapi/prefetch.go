@@ -181,6 +181,10 @@ func prefetchHandler(manager *PrefetchManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		studyUID := r.PathValue("studyUID")
 
+		if !requireUIDs(w, studyUID) {
+			return
+		}
+
 		req, err := readPrefetchRequest(r.Body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)

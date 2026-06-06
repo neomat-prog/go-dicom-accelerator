@@ -17,7 +17,7 @@ import (
 )
 
 func TestPrefetchManager_StartAllSeriesInBatches(t *testing.T) {
-	src := newPrefetchTestSource("study-01", 16, 2)
+	src := newPrefetchTestSource("1.2.840.10001", 16, 2)
 	fetcher := dicomfetch.New(src, dicomfetch.Options{MaxConcurrency: 4})
 	manager := NewPrefetchManager(src, fetcher)
 	var batchSizes []int
@@ -25,7 +25,7 @@ func TestPrefetchManager_StartAllSeriesInBatches(t *testing.T) {
 		batchSizes = append(batchSizes, len(series))
 	}
 
-	job, err := manager.Start(context.Background(), "study-01", PrefetchRequest{SeriesBatchSize: 6})
+	job, err := manager.Start(context.Background(), "1.2.840.10001", PrefetchRequest{SeriesBatchSize: 6})
 	if err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
@@ -57,11 +57,11 @@ func TestPrefetchManager_StartAllSeriesInBatches(t *testing.T) {
 }
 
 func TestPrefetchManager_StartSelectedSeries(t *testing.T) {
-	src := newPrefetchTestSource("study-01", 6, 2)
+	src := newPrefetchTestSource("1.2.840.10001", 6, 2)
 	fetcher := dicomfetch.New(src, dicomfetch.Options{MaxConcurrency: 4})
 	manager := NewPrefetchManager(src, fetcher)
 
-	job, err := manager.Start(context.Background(), "study-01", PrefetchRequest{
+	job, err := manager.Start(context.Background(), "1.2.840.10001", PrefetchRequest{
 		SeriesInstanceUIDs: []string{"series-02", "series-04"},
 		SeriesBatchSize:    6,
 	})
@@ -85,13 +85,13 @@ func TestPrefetchManager_StartSelectedSeries(t *testing.T) {
 }
 
 func TestPrefetchRoutes_StartAndStatus(t *testing.T) {
-	src := newPrefetchTestSource("study-01", 2, 2)
+	src := newPrefetchTestSource("1.2.840.10001", 2, 2)
 	fetcher := dicomfetch.New(src, dicomfetch.Options{MaxConcurrency: 2})
 	manager := NewPrefetchManager(src, fetcher)
 	mux := NewAcceleratedMux(src, "test", mockProber{}, src, fetcher, manager)
 
 	body := bytes.NewBufferString(`{"seriesBatchSize":6}`)
-	req := httptest.NewRequest(http.MethodPost, "/studies/study-01/prefetch", body)
+	req := httptest.NewRequest(http.MethodPost, "/studies/1.2.840.10001/prefetch", body)
 	w := httptest.NewRecorder()
 
 	mux.ServeHTTP(w, req)
@@ -132,12 +132,12 @@ func TestPrefetchRoutes_StartAndStatus(t *testing.T) {
 }
 
 func TestPrefetchRoutes_InvalidStudyAndUnknownJob(t *testing.T) {
-	src := newPrefetchTestSource("study-01", 1, 1)
+	src := newPrefetchTestSource("1.2.840.10001", 1, 1)
 	fetcher := dicomfetch.New(src, dicomfetch.Options{MaxConcurrency: 2})
 	manager := NewPrefetchManager(src, fetcher)
 	mux := NewAcceleratedMux(src, "test", mockProber{}, src, fetcher, manager)
 
-	req := httptest.NewRequest(http.MethodPost, "/studies/missing-study/prefetch", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/studies/1.2.840.99999/prefetch", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 
 	mux.ServeHTTP(w, req)

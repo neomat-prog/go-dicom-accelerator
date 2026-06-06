@@ -15,7 +15,6 @@ OHIF Viewer / Go App
 DICOM Retrieval Accelerator
         |
         +-- Google Cloud Storage
-        +-- Local filesystem
 ```
 
 ## How It Works
@@ -82,14 +81,6 @@ for _, inst := range window {
 
 ## Sources
 
-### Local filesystem
-
-```go
-src := source.NewLocalDirectory("/path/to/dicom/root")
-```
-
-Walks all `.dcm` files under the root, parses metadata with `dicom.SkipPixelData()`, and groups by Study/Series UID.
-
 ### Google Cloud Storage
 
 Files must follow the path convention `{studyUID}/{seriesUID}/{sopUID}.dcm` (optionally under a prefix).
@@ -115,10 +106,6 @@ The included gateway demonstrates the library over HTTP. It exposes DICOMweb-sha
 Create a `.env` file in the repository root:
 
 ```env
-# Local filesystem
-SOURCE_TYPE=local-directory
-LOCAL_DICOM_ROOT=./sample-dicom
-
 # Google Cloud Storage
 SOURCE_TYPE=gcs
 GCS_BUCKET=my-bucket

@@ -186,6 +186,10 @@ func (s *Source) Instance(ctx context.Context, ref source.InstanceRef) (source.R
 		return source.Response{}, err
 	}
 
+	if !source.ValidUID(ref.StudyInstanceUID) || !source.ValidUID(ref.SeriesInstanceUID) || !source.ValidUID(ref.SOPInstanceUID) {
+		return source.Response{}, source.Wrap(source.ErrorKindBadRequest, fmt.Errorf("invalid UID in instance ref"))
+	}
+
 	name := s.objectName(ref)
 	obj := s.bucket.Object(name)
 
