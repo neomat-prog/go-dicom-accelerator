@@ -243,7 +243,7 @@ func (f *Fetcher) WarmSeries(ctx context.Context, refs []source.InstanceRef) (in
 		return 0, 0, nil
 	}
 
-	sem := make(chan struct{}, f.Options.MaxConcurrency)
+	semch := make(chan struct{}, f.Options.MaxConcurrency)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -256,12 +256,12 @@ outer:
 		select {
 		case <-ctx.Done():
 			break outer
-		case sem <- struct{}{}:
+		case semch <- struct{}{}:
 		}
 		wg.Add(1)
 		go func(ref source.InstanceRef) {
 			defer wg.Done()
-			defer func() { <-sem }()
+			defer func() { <-semch }()
 			fi, err := f.FetchInstance(ctx, ref)
 			mu.Lock()
 			defer mu.Unlock()
@@ -270,7 +270,7 @@ outer:
 				return
 			}
 			bytesLoaded += int64(len(fi.Data))
-			fi.Data = nil // cache already holds its clone
+			fi.Data = nil
 			completed++
 		}(ref)
 	}
@@ -301,7 +301,7 @@ func (f *Fetcher) fetchRefs(ctx context.Context, refs []source.InstanceRef, labe
 	defer cancel()
 
 	instances := make([]FetchedInstance, len(refs))
-	sem := make(chan struct{}, f.Options.MaxConcurrency)
+	semch := make(chan struct{}, f.Options.MaxConcurrency)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -311,13 +311,13 @@ outer:
 		select {
 		case <-ctx.Done():
 			break outer
-		case sem <- struct{}{}:
+		case semch <- struct{}{}:
 		}
 		wg.Add(1)
 
 		go func(i int, ref source.InstanceRef) {
 			defer wg.Done()
-			defer func() { <-sem }()
+			defer func() { <-semch }()
 
 			log.Printf("dicomfetch: %s fetch start index=%d sop=%s", label, i, ref.SOPInstanceUID)
 
