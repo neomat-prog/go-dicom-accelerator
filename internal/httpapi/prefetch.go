@@ -121,11 +121,12 @@ func (m *PrefetchManager) Start(ctx context.Context, studyUID string, req Prefet
 	m.sweepLocked()
 	m.jobs[job.JobID] = &job
 	m.cancels[job.JobID] = cancel
+	snapshot := clonePrefetchJob(job)
 	m.mu.Unlock()
 
 	go m.run(jobCtx, job.JobID, selected, batchSize)
 
-	return clonePrefetchJob(job), nil
+	return snapshot, nil
 }
 
 // Status returns a snapshot of one prefetch job.
