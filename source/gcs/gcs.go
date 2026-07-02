@@ -24,7 +24,7 @@ type Source struct {
 	index    *gcsIndex
 	indexTTL time.Duration
 	group    singleflight.Group
-	now      func() time.Time // for tests
+	now      func() time.Time
 }
 
 type gcsIndex struct {
@@ -143,7 +143,7 @@ func (s *Source) SeriesInstances(ctx context.Context, studyUID, seriesUID string
 	if len(instances) == 0 {
 		return nil, source.Wrap(source.ErrorKindNotFound, fmt.Errorf("series not found"))
 	}
-	return instances, nil // idx.all already sorted
+	return instances, nil
 }
 
 // StudySeries groups GCS objects by study and series identifiers.
