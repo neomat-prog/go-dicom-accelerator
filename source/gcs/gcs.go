@@ -166,7 +166,6 @@ func (s *Source) StudySeries(ctx context.Context, studyUID string) ([]source.Ser
 	return out, nil
 }
 
-// StudyMetadata returns identifiers from the first matching GCS object.
 func (s *Source) StudyMetadata(ctx context.Context, studyUID string) (source.Metadata, error) {
 	instances, err := s.SeriesInstances(ctx, studyUID, "")
 	if err != nil {
@@ -180,7 +179,6 @@ func (s *Source) StudyMetadata(ctx context.Context, studyUID string) (source.Met
 	}, nil
 }
 
-// Instance opens the GCS object matching ref.
 func (s *Source) Instance(ctx context.Context, ref source.InstanceRef) (source.Response, error) {
 	if err := ctx.Err(); err != nil {
 		return source.Response{}, err
